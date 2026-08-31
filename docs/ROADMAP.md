@@ -64,8 +64,9 @@ must stay fully functional — providers enrich, nothing depends on them.
 
 ## 3. Chapter editing
 
-Editing titles and times for m4b/mp4 (chapter track rewrite via `AVAssetWriter`)
-and mkv (`Chapters` element, using the same patch machinery `MatroskaTagWriter`
+✅ **MPEG-4 chapter writing** is done via `MPEG4ChapterWriter` (remuxing with `AVAssetWriter`).
+
+**Remaining**: Editing titles and times for mkv (`Chapters` element, using the same patch machinery `MatroskaTagWriter`
 already has — this half is now mostly plumbing).
 
 ---

@@ -95,7 +95,7 @@ final class FixtureLibrary {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+// deinit { try? FileManager.default.removeItem(at: root) }
 
     /// Silent, tagless media of the right container, at `fixture.filename`.
     func makeUntagged(_ fixture: TwinPeaks.Fixture, seconds: Double = 0.6) throws -> URL {

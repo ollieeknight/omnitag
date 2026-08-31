@@ -58,7 +58,7 @@ write path lands.
 | Kind | Read (now) | Write (phase 2) |
 |---|---|---|
 | Music | mp3 (ID3), m4a, wav, aiff | m4a ✅, mp3 ✅ (ID3v2.4) |
-| Audiobook | m4b, incl. chapters | m4b ✅ (chapters phase 4) |
+| Audiobook | m4b, incl. chapters | m4b ✅ (chapters ✅) |
 | Video | mp4, mov, m4v | mp4, mov, m4v ✅ |
 | Movie / TV (mkv) | tags, chapters, cover attachments | tags ✅ (in-place) |
 | flac, ogg, opus | scanned, not yet parsed | phase 5 |

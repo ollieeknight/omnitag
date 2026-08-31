@@ -8,7 +8,7 @@ one side of a table only.
 
 | Container | Read | Write | Backend |
 |---|---|---|---|
-| m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags | AVFoundation |
+| m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags, chapters | AVFoundation |
 | mp3 | ✅ ID3v2 tags | ✅ writes v2.4 | AVFoundation read, `ID3TagWriter` write |
 | wav, aiff | ✅ basic | ❌ | AVFoundation |
 | mkv | ✅ tags, chapters, cover attachments | ✅ tags (in-place patch) | `MatroskaReader` / `MatroskaTagWriter` |

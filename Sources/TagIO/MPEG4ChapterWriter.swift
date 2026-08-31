@@ -33,7 +33,7 @@ public struct MPEG4ChapterWriter: Sendable {
         _ = try await asset.load(.tracks, .duration)
         
         let reader = try AVAssetReader(asset: asset)
-        let writer = try AVAssetWriter(url: temp, fileType: MPEG4TagWriter.fileType(for: container))
+        let writer = try AVAssetWriter(url: temp, fileType: .mp4)
         
         writer.metadata = MPEG4TagWriter.metadataItems(from: tags, artwork: artwork)
         
@@ -43,27 +43,80 @@ public struct MPEG4ChapterWriter: Sendable {
         }
         
         let audioOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
-        if reader.canAdd(audioOutput) { reader.add(audioOutput) }
+        guard reader.canAdd(audioOutput) else {
+            throw TagIOError.writeFailed(url, "Cannot add audio output to reader")
+        }
+        reader.add(audioOutput)
         
-        let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
-        if writer.canAdd(audioInput) { writer.add(audioInput) }
+        let formats = try? await audioTrack.load(.formatDescriptions)
+        let format = formats?.first
+        let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: format)
+        guard writer.canAdd(audioInput) else {
+            throw TagIOError.writeFailed(url, "Cannot add audio input to writer")
+        }
+        writer.add(audioInput)
         
-        // 2. Create the chapter text track
-        let chapterInput = AVAssetWriterInput(mediaType: .text, outputSettings: nil)
-        // Chapter track must not be enabled by default so it doesn't render as subtitles on screen.
-        chapterInput.marksOutputTrackAsEnabled = false 
+        // 2. Create the chapter text track (QuickTime Text format)
+        var textDesc: CMFormatDescription?
+        let extensions: [String: Any] = [
+            "BackgroundColor": ["Blue": 0, "Green": 0, "Red": 0],
+            "DefaultFontName": "",
+            "DefaultStyle": [
+                "Ascent": 0, "Font": 0, "FontFace": 0, "FontSize": 26228,
+                "ForegroundColor": ["Blue": 1, "Green": 1, "Red": 24930],
+                "Height": 0, "StartChar": 65536
+            ],
+            "DefaultTextBox": ["Bottom": 0, "Left": 0, "Right": 0, "Top": 0],
+            "DisplayFlags": 1,
+            "TextJustification": 0
+        ]
+        
+        func fourCharCode(_ string: String) -> FourCharCode {
+            var result: FourCharCode = 0
+            for char in string.utf16 {
+                result = (result << 8) + FourCharCode(char)
+            }
+            return result
+        }
+        
+        let status = CMFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            mediaType: kCMMediaType_Text,
+            mediaSubType: fourCharCode("text"),
+            extensions: extensions as CFDictionary,
+            formatDescriptionOut: &textDesc
+        )
+        
+        guard status == noErr, let desc = textDesc else {
+            throw TagIOError.writeFailed(url, "Failed to create text format description")
+        }
+        
+        let chapterInput = AVAssetWriterInput(
+            mediaType: .text, 
+            outputSettings: nil, 
+            sourceFormatHint: desc
+        )
+        chapterInput.languageCode = "en"
+        chapterInput.extendedLanguageTag = "en"
+        chapterInput.marksOutputTrackAsEnabled = false
+        chapterInput.expectsMediaDataInRealTime = false
         
         // Link the audio track to the chapter track
         audioInput.addTrackAssociation(withTrackOf: chapterInput, type: AVAssetTrack.AssociationType.chapterList.rawValue)
         
-        if writer.canAdd(chapterInput) { writer.add(chapterInput) }
-        
-        let chapterAdaptor = AVAssetWriterInputMetadataAdaptor(assetWriterInput: chapterInput)
+        guard writer.canAdd(chapterInput) else {
+            throw TagIOError.writeFailed(url, "Cannot add chapter input to writer")
+        }
+        writer.add(chapterInput)
         
         // 3. Start processing
-        writer.startWriting()
+        if !writer.startWriting() {
+            throw TagIOError.writeFailed(url, writer.error?.localizedDescription ?? "Failed to start writing")
+        }
         writer.startSession(atSourceTime: .zero)
-        reader.startReading()
+        if !reader.startReading() {
+            throw TagIOError.writeFailed(url, reader.error?.localizedDescription ?? "Failed to start reading")
+        }
         
         let audioGroup = DispatchGroup()
         audioGroup.enter()
@@ -77,16 +130,69 @@ public struct MPEG4ChapterWriter: Sendable {
                 start: CMTime(seconds: chapter.start, preferredTimescale: 600),
                 duration: CMTime(seconds: duration > 0 ? duration : 1.0, preferredTimescale: 600)
             )
-            let item = AVMutableMetadataItem()
-            item.identifier = .quickTimeUserDataChapter
-            item.dataType = kCMMetadataBaseDataType_UTF8 as String
-            item.value = chapter.title as NSString
-            item.time = timeRange.start
-            item.duration = timeRange.duration
             
-            let group = AVTimedMetadataGroup(items: [item], timeRange: timeRange)
-            chapterAdaptor.append(group)
+            let textBytes = [UInt8](chapter.title.utf8)
+            let length = UInt16(textBytes.count).bigEndian
+            var data = Data()
+            withUnsafeBytes(of: length) { data.append(contentsOf: $0) }
+            data.append(contentsOf: textBytes)
+            
+            var blockBuffer: CMBlockBuffer?
+            data.withUnsafeBytes { ptr in
+                CMBlockBufferCreateWithMemoryBlock(
+                    allocator: kCFAllocatorDefault,
+                    memoryBlock: nil,
+                    blockLength: data.count,
+                    blockAllocator: nil,
+                    customBlockSource: nil,
+                    offsetToData: 0,
+                    dataLength: data.count,
+                    flags: 0,
+                    blockBufferOut: &blockBuffer
+                )
+                if let bb = blockBuffer {
+                    CMBlockBufferReplaceDataBytes(
+                        with: ptr.baseAddress!,
+                        blockBuffer: bb,
+                        offsetIntoDestination: 0,
+                        dataLength: data.count
+                    )
+                }
+            }
+            
+            var sampleBuffer: CMSampleBuffer?
+            var timing = CMSampleTimingInfo(
+                duration: timeRange.duration,
+                presentationTimeStamp: timeRange.start,
+                decodeTimeStamp: .invalid
+            )
+            var sampleSize = data.count
+            
+            if let bb = blockBuffer {
+                CMSampleBufferCreate(
+                    allocator: kCFAllocatorDefault,
+                    dataBuffer: bb,
+                    dataReady: true,
+                    makeDataReadyCallback: nil,
+                    refcon: nil,
+                    formatDescription: desc,
+                    sampleCount: 1,
+                    sampleTimingEntryCount: 1,
+                    sampleTimingArray: &timing,
+                    sampleSizeEntryCount: 1,
+                    sampleSizeArray: &sampleSize,
+                    sampleBufferOut: &sampleBuffer
+                )
+            }
+            
+            if let sb = sampleBuffer {
+                while !chapterInput.isReadyForMoreMediaData {
+                    usleep(100)
+                }
+                chapterInput.append(sb)
+            }
         }
+        chapterInput.markAsFinished()
         
         final class UncheckedSendable<T>: @unchecked Sendable {
             let value: T

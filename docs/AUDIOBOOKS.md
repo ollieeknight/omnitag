@@ -83,8 +83,8 @@ Editing them is the open design question; the plan:
      would still disagree with it.
   3. Do both: patch `chpl` and rewrite the text track's sample data in place
      when the new titles fit the existing sample sizes.
-  **Recommendation: (1) first**, because correctness beats speed for a feature
-  that runs once per book, with (2) added later as a fast path when only titles
+  **Decision**: (1) is now implemented via `MPEG4ChapterWriter`, because correctness beats speed for a feature
+  that runs once per book. (2) may be added later as a fast path when only titles
   changed and the file already has a `chpl` atom.
 
 Whatever is chosen, the write goes through the same staged-and-verified
@@ -95,7 +95,7 @@ alongside the previous tags.
 
 Done: `MetadataAPI` module — `AudibleClient`, `AudnexusClient`,
 `AudiobookMetadataService`, region fallback, search ladder, ranking, ASIN/URL
-parsing, offline fixtures, live opt-in tests.
+parsing, offline fixtures, live opt-in tests. **MPEG-4 chapter writing** via `MPEG4ChapterWriter`.
 
 Next: the tag diff model, artwork download and `covr` writing, the wizard UI,
-then chapter editing.
+then mkv chapter editing.
