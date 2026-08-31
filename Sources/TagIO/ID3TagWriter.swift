@@ -14,7 +14,7 @@ public struct ID3TagWriter: Sendable {
         self.backups = backups
     }
 
-    public func write(_ tags: TagSet, to url: URL) async throws {
+    public func write(_ tags: TagSet, artwork: [Artwork] = [], to url: URL) async throws {
         guard ContainerFormat(pathExtension: url.pathExtension) == .mp3 else {
             throw TagIOError.unsupportedContainer(url.pathExtension)
         }
@@ -38,7 +38,19 @@ public struct ID3TagWriter: Sendable {
         }
 
         let audio = data.dropFirst(existing?.totalSize ?? 0)
-        let merged = ID3v2.merge(tags, into: upgraded(existing?.frames ?? []))
+        var merged = ID3v2.merge(tags, into: upgraded(existing?.frames ?? []))
+
+        merged.removeAll { $0.id == "APIC" }
+        for art in artwork {
+            var payload = Data([0x00]) // Text encoding: ISO-8859-1 for mime type and description
+            payload.append(contentsOf: Array(art.mimeType.utf8))
+            payload.append(0x00) // null terminator for mime type
+            let pictureType: UInt8 = art.role == .cover ? 0x03 : 0x00 // 3 = front cover, 0 = other
+            payload.append(pictureType)
+            payload.append(0x00) // null terminator for empty description
+            payload.append(art.data)
+            merged.append(ID3v2.Frame(id: "APIC", flags: [0, 0], payload: payload))
+        }
 
         var output = ID3v2.serialise(merged)
         output.append(audio)

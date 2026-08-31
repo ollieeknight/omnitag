@@ -12,6 +12,8 @@ struct OmniTagApp: App {
         WindowGroup {
             LibraryView(model: model)
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Add Folder…") { model.pickFolder() }
@@ -43,6 +45,7 @@ final class LibraryModel {
     var canUndo = false
     var canRedo = false
     var dirtyCount = 0
+    var showWizard = false
 
     private let engine = EditEngine(writer: FileTagWriter())
 
@@ -66,21 +69,62 @@ final class LibraryModel {
         Task { await load(url) }
     }
 
+    func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add to Library"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let urls = panel.urls
+        Task { await load(urls: urls) }
+    }
+
     func load(_ root: URL) async {
-        status = "Scanning \(root.lastPathComponent)…"
+        await load(urls: [root])
+    }
+
+    func load(urls: [URL]) async {
+        status = "Scanning \(urls.count) item\(urls.count == 1 ? "" : "s")…"
         do {
-            let scanned = try await LibraryScanner().scan(root)
-            items = scanned
-            status = "\(scanned.count) files — reading tags…"
-            // ponytail: serial read, one file at a time. Swap for a TaskGroup
-            // when a real library (10k+ files) makes the wait visible.
-            let reader = MediaTagReader()
-            for (index, item) in scanned.enumerated() {
-                if let read = try? await reader.read(item.url) { items[index] = read }
+            let scanner = LibraryScanner()
+            var scanned: [MediaItem] = []
+            for url in urls {
+                // If it's a directory, scan it. If it's a file, just wrap it if valid.
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                    var items = try await scanner.scan(url)
+                    // Force the imported items into the currently selected media kind
+                    for i in items.indices {
+                        items[i].kind = self.kind
+                    }
+                    scanned.append(contentsOf: items)
+                } else if let container = ContainerFormat(pathExtension: url.pathExtension) {
+                    scanned.append(MediaItem(url: url, kind: self.kind, container: container, duration: nil, tags: TagSet()))
+                }
             }
-            await engine.load(items)
+            
+            // Append rather than replace so users can drop multiple times
+            var newItems = self.items
+            newItems.append(contentsOf: scanned)
+            // deduplicate by URL
+            var seen = Set<URL>()
+            newItems = newItems.filter { seen.insert($0.url).inserted }
+            
+            self.items = newItems
+            status = "\(newItems.count) files — reading tags…"
+            
+            let reader = MediaTagReader()
+            for (index, item) in newItems.enumerated() {
+                // Only read if it hasn't been read yet (empty tags/duration). 
+                // ponytail: this is a simple heuristic, but good enough for now.
+                if item.duration == nil, let read = try? await reader.read(item.url) { 
+                    self.items[index] = read 
+                }
+            }
+            await engine.load(self.items)
             await refresh()
-            status = "\(items.count) files"
+            status = "\(self.items.count) files"
         } catch {
             status = "Scan failed: \(error.localizedDescription)"
         }
@@ -90,6 +134,13 @@ final class LibraryModel {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
         await engine.apply(edit, to: urls)
+        await refresh()
+    }
+    
+    func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?) async {
+        let urls = Array(selection)
+        guard !urls.isEmpty else { return }
+        await engine.applySnapshot(tags: tags, artwork: artwork, chapters: chapters, to: urls)
         await refresh()
     }
 

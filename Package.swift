@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "omnitag",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS("26.0")],
     products: [
         .library(name: "MediaCore", targets: ["MediaCore"]),
         .library(name: "TagIO", targets: ["TagIO"]),

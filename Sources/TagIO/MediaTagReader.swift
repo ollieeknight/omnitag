@@ -43,17 +43,21 @@ public struct MediaTagWriter: Sendable {
         self.backups = backups
     }
 
-    public func write(_ tags: TagSet, to url: URL) async throws {
+    public func write(_ tags: TagSet, artwork: [Artwork] = [], chapters: [Chapter]? = nil, to url: URL) async throws {
         guard let container = ContainerFormat(pathExtension: url.pathExtension) else {
             throw TagIOError.unsupportedContainer(url.pathExtension)
         }
         switch container {
         case .mp3:
-            try await ID3TagWriter(backups: backups).write(tags, to: url)
+            try await ID3TagWriter(backups: backups).write(tags, artwork: artwork, to: url)
         case .mkv:
             try await MatroskaTagWriter(backups: backups).write(tags, to: url)
         case _ where container.isMPEG4Family:
-            try await MPEG4TagWriter(backups: backups).write(tags, to: url)
+            if let chapters, !chapters.isEmpty {
+                try await MPEG4ChapterWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)
+            } else {
+                try await MPEG4TagWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)
+            }
         default:
             throw TagIOError.unsupportedContainer(container.rawValue)
         }

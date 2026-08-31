@@ -26,12 +26,11 @@ describes — a stale STATUS is worse than none, because the next session trusts
 - **flac, ogg/opus.** Scanned and listed, not parsed at all.
 - **mkv chapters and attachments are read-only.** Only the `Tags` element is
   written; editing chapters means the same patch machinery applied to `Chapters`.
-- **Chapter editing.** Read-only everywhere.
+- **Chapter editing.** Writable for MPEG-4 files (via remuxing). Read-only for mkv.
 - **Artwork editing.** Read only; no add/replace/remove.
 - **Metadata providers.** Audiobooks done (Audible + Audnexus). TMDB, TVmaze,
   iTunes and MusicBrainz not started.
-- **The audiobook wizard UI.** The API layer is done; the drag-and-drop,
-  search sheet, tag diff and chapter diff are not built yet.
+- **The audiobook wizard UI.** The search sheet, tag diff, and chapter diff are built and wired up. Drag-and-drop is not built yet.
 - **Filename ↔ tag conversion.** Not started.
 - **Library persistence.** Nothing is remembered between launches; you re-add the folder each time.
 

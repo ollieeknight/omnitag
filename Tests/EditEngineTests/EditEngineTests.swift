@@ -6,12 +6,12 @@ import Testing
 /// Records writes instead of touching disk: the engine's job is ordering,
 /// batching and undo, not I/O.
 actor SpyWriter: TagPersisting {
-    private(set) var writes: [(URL, TagSet)] = []
+    private(set) var writes: [(URL, TagSet, [Artwork], [Chapter]?)] = []
     var failing: Set<URL> = []
 
-    func write(_ tags: TagSet, to url: URL) async throws {
+    func write(_ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, to url: URL) async throws {
         if failing.contains(url) { throw TagWriteError.refused(url) }
-        writes.append((url, tags))
+        writes.append((url, tags, artwork, chapters))
     }
 
     func fail(_ url: URL) { failing.insert(url) }

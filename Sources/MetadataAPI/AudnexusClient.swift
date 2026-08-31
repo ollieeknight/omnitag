@@ -175,6 +175,29 @@ public struct AudiobookMetadataService: Sendable {
                 }
             }
         }
+        
+        // OpenLibrary fallback
+        let openLibrary = OpenLibraryClient(transport: transport)
+        for rung in query.searchLadder.isEmpty ? [""] : query.searchLadder {
+            var attempt = query
+            attempt.keywords = query.asin == nil ? rung : nil
+            attempt.title = nil
+            attempt.author = nil
+            attempt.narrator = nil
+            do {
+                let results = try await openLibrary.search(attempt, limit: limit)
+                if !results.isEmpty {
+                    return SearchOutcome(
+                        candidates: results.sorted { query.score($0) > query.score($1) },
+                        region: region)
+                }
+            } catch MetadataError.emptyQuery {
+                throw MetadataError.emptyQuery
+            } catch {
+                lastError = error
+            }
+        }
+        
         if let lastError { throw lastError }
         return SearchOutcome(candidates: [], region: region)
     }
@@ -182,6 +205,12 @@ public struct AudiobookMetadataService: Sendable {
     /// Chapters are best-effort: plenty of books have none, and a missing list
     /// must not cost the user the tags they came for.
     public func details(for asin: String, in preferredRegion: AudibleRegion? = nil) async throws -> AudiobookDetails {
+        if asin.starts(with: "/works/") {
+            let client = OpenLibraryClient(transport: transport)
+            let book = try await client.book(key: asin)
+            return AudiobookDetails(book: book, chapters: [])
+        }
+        
         let regions = preferredRegion.map { $0 == .unitedStates ? [$0] : [$0, .unitedStates] }
             ?? fallbackRegions
         var lastError: (any Error)?

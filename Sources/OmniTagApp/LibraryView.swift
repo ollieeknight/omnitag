@@ -18,9 +18,14 @@ struct LibraryView: View {
                 InspectorView(model: model)
                     .frame(minWidth: 280, idealWidth: 320)
             }
-            .navigationTitle("OmniTag")
+            .navigationTitle(model.kind.title)
             .toolbar { toolbar }
-            .safeAreaInset(edge: .bottom) { statusBar }
+            .overlay(alignment: .bottom) { statusBar }
+            .sheet(isPresented: $model.showWizard) {
+                AudiobookWizardView(items: model.selectedItems) { tags, artwork, chapters in
+                    await model.applyWizardSnapshot(tags: tags, artwork: artwork, chapters: chapters)
+                }
+            }
         }
     }
 
@@ -42,37 +47,82 @@ struct LibraryView: View {
             TableColumn("Format") { Text($0.container.rawValue.uppercased()) }
             TableColumn("Length") { Text($0.duration.map(Self.formatted) ?? "—").monospacedDigit() }
         }
+        .contextMenu(forSelectionType: URL.self) { selection in
+            if !selection.isEmpty && model.kind == .audiobook {
+                Button {
+                    model.selection = selection
+                    model.showWizard = true
+                } label: {
+                    Label("Search Metadata…", systemImage: "wand.and.stars")
+                }
+            }
+        }
+        .dropDestination(for: URL.self) { items, location in
+            Task { await model.load(urls: items) }
+            return true
+        }
         .searchable(text: $model.search, prompt: "Search library")
         .frame(minWidth: 480)
     }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            Button("Add Folder", systemImage: "folder.badge.plus") { model.pickFolder() }
+        ToolbarItem(placement: .primaryAction) {
+            Button("Audiobook Wizard", systemImage: "wand.and.stars") {
+                model.showWizard = true
+            }
+            .disabled(model.selection.isEmpty || model.kind != .audiobook)
+            .help("Open Audiobook Wizard")
+        }
+        
+        ToolbarSpacer(.fixed)
+        
+        ToolbarItem(placement: .automatic) {
+            Menu {
+                Button("Add Folder…", systemImage: "folder.badge.plus") { model.pickFolder() }
+                Button("Add Files…", systemImage: "doc.badge.plus") { model.pickFiles() }
+            } label: {
+                Label("Import", systemImage: "plus")
+            }
+            .help("Import Files or Folders to Library")
+        }
+        
+        ToolbarSpacer(.fixed)
+        
+        ToolbarItem(placement: .automatic) {
             Button("Undo", systemImage: "arrow.uturn.backward") { Task { await model.undo() } }
                 .disabled(!model.canUndo)
+                .help("Undo Last Edit")
+        }
+        
+        ToolbarItem(placement: .automatic) {
             Button("Redo", systemImage: "arrow.uturn.forward") { Task { await model.redo() } }
                 .disabled(!model.canRedo)
+                .help("Redo Last Edit")
+        }
+        
+        ToolbarSpacer(.flexible)
+        
+        ToolbarItem(placement: .confirmationAction) {
             Button("Save", systemImage: "square.and.arrow.down") { Task { await model.save() } }
                 .disabled(model.dirtyCount == 0)
+                .help("Save Changes")
         }
     }
 
     private var statusBar: some View {
-        HStack {
+        HStack(spacing: 12) {
             Text(model.status)
-            Spacer()
             if model.dirtyCount > 0 {
                 Text("\(model.dirtyCount) unsaved")
                     .foregroundStyle(.orange)
             }
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
+        .font(.subheadline)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .glassEffect(.regular)
+        .padding(.bottom, 16)
     }
 
     static func formatted(_ seconds: TimeInterval) -> String {
@@ -99,6 +149,18 @@ struct InspectorView: View {
                         .foregroundStyle(.orange)
                         .font(.callout)
                 }
+                
+                if let artwork = singleSelection?.artwork.first, let nsImage = NSImage(data: artwork.data) {
+                    Section {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .shadow(radius: 3, y: 2)
+                    }
+                }
+
                 Section(header: Text(header)) {
                     ForEach(fields, id: \.key) { field in
                         TagField(key: field.key, label: field.label, model: model)

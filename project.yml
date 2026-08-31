@@ -5,7 +5,7 @@ name: OmniTag
 options:
   bundleIdPrefix: com.oliverknight
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "26.0"
   createIntermediateGroups: true
   groupSortPosition: top
 
@@ -37,6 +37,8 @@ targets:
         product: LibraryIndex
       - package: OmniTag
         product: EditEngine
+      - package: OmniTag
+        product: MetadataAPI
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist

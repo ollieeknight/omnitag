@@ -15,7 +15,7 @@ public struct MPEG4TagWriter: Sendable {
         self.backups = backups
     }
 
-    public func write(_ tags: TagSet, to url: URL) async throws {
+    public func write(_ tags: TagSet, artwork: [Artwork] = [], chapters: [Chapter]? = nil, to url: URL) async throws {
         guard let container = ContainerFormat(pathExtension: url.pathExtension),
               container.isMPEG4Family
         else { throw TagIOError.unsupportedContainer(url.pathExtension) }
@@ -32,7 +32,7 @@ public struct MPEG4TagWriter: Sendable {
         guard let session = AVAssetExportSession(
             asset: asset, presetName: AVAssetExportPresetPassthrough)
         else { throw TagIOError.unreadable(url, "no passthrough export session") }
-        session.metadata = Self.metadataItems(from: tags)
+        session.metadata = Self.metadataItems(from: tags, artwork: artwork)
 
         do {
             try await session.export(to: temp, as: Self.fileType(for: container))
@@ -64,7 +64,7 @@ public struct MPEG4TagWriter: Sendable {
         }
     }
 
-    static func metadataItems(from tags: TagSet) -> [AVMetadataItem] {
+    static func metadataItems(from tags: TagSet, artwork: [Artwork]) -> [AVMetadataItem] {
         var items: [AVMetadataItem] = []
 
         for pair in MPEG4KeyMap.pairAtoms {
@@ -91,6 +91,23 @@ public struct MPEG4TagWriter: Sendable {
             item.extendedLanguageTag = "und"
             if let copy = item.copy() as? AVMetadataItem { items.append(copy) }
         }
+        for art in artwork {
+            let item = AVMutableMetadataItem()
+            item.identifier = .iTunesMetadataCoverArt
+            // Determine type from magic bytes if possible, or fallback to mimeType mapping
+            let type: String
+            if art.data.starts(with: [0xFF, 0xD8, 0xFF]) {
+                type = "public.jpeg"
+            } else if art.data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+                type = "public.png"
+            } else {
+                type = art.mimeType == "image/png" ? "public.png" : "public.jpeg"
+            }
+            item.dataType = type
+            item.value = art.data as NSData
+            if let copy = item.copy() as? AVMetadataItem { items.append(copy) }
+        }
+
         return items
     }
 }

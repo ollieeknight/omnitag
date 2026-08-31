@@ -9,8 +9,8 @@ Phases 1–4: domain model, folder scan, MPEG-4 read/write, ID3 read, **Matroska
 read** (hand-written EBML parser — AVFoundation cannot open mkv at all),
 chapter read, **mp3 writing** (hand-rolled ID3v2.4), **mkv writing** (in-place
 EBML patch), tag backups, undo/redo, batch editing, and a three-pane SwiftUI
-browser. Artwork editing and metadata providers are still to come
-— see `docs/ARCHITECTURE.md`.
+browser. **Metadata Providers** (Audible, Audnexus, OpenLibrary) are now
+implemented — see `docs/ARCHITECTURE.md`.
 
 Writes are staged: temp file in the same directory, re-read to prove it is
 playable, then an atomic swap, with the previous tags archived to JSON first.
