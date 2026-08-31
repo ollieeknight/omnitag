@@ -10,19 +10,20 @@ describes — a stale STATUS is worse than none, because the next session trusts
 | Domain model | `MediaCore`: `MediaItem`, `TagSet`, `TagKey`, `Chapter`, `Artwork`. Foundation only. |
 | Scanning | `LibraryScanner`: recursive walk, extension-typed, hidden files and packages skipped. |
 | Reading | `MediaTagReader` routes by container: AVFoundation for MPEG-4/mp3/wav/aiff, `MatroskaReader` for mkv. |
-| ID3 | Read only. Frames mapped to real keys, `3/12` track convention split. |
+| Writing | `MediaTagWriter` routes: `MPEG4TagWriter` for the MP4 family, `ID3TagWriter` for mp3. |
+| ID3 | Read **and** write. Writes v2.4/UTF-8, preserves unmanaged frames, `3/12` split. |
 | MPEG-4 | Read **and** write. Standard atoms (`©nam`, `tvsh`, `trkn`…) plus freeform `----` for SERIES/ASIN/STUDIO. |
 | Matroska | Read only. Info, Tags (target-level aware), Chapters, cover attachments. |
 | Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Not editable yet. |
 | Writing safety | Stage to sibling temp → re-read to verify → atomic `replaceItemAt`. Previous tags archived as JSON. |
 | Editing | `EditEngine`: batch `set`/`clear`/`replace` over a selection, undo/redo per batch, save only dirty files. |
 | UI | Three panes: kind sidebar, sortable table, batch inspector with per-kind field sets and chapter list. |
-| Tests | 48, no network. Real-media assertions when `OMNITAG_REAL_MEDIA` is set. |
+| Tests | 68, no network. Real-media assertions when `OMNITAG_REAL_MEDIA` is set. |
 
 ## Does not work yet
 
-- **mp3 writing.** Reads fine, cannot save. Next task — see ROADMAP.
-- **mkv writing.** Same. Must be an in-place element rewrite, never a remux.
+- **mkv writing.** Reads fine, cannot save. Next task — see ROADMAP. Must be an
+  in-place element rewrite, never a remux.
 - **flac, ogg/opus.** Scanned and listed, not parsed at all.
 - **Chapter editing.** Read-only everywhere.
 - **Artwork editing.** Read only; no add/replace/remove.
@@ -44,11 +45,17 @@ step.
   correctly but is ugly if ever surfaced raw in the UI.
 - `.m4b` is written as `AVFileType.m4a`; AVFoundation has no separate m4b type.
   The extension is preserved, which is what players key on.
+- ID3v2.2 and unsynchronised tags are **refused** on write rather than rewritten,
+  because we cannot re-encode their frames faithfully. No such file has turned up
+  yet; if one does, the error names the reason.
+- An existing ID3v1 128-byte trailer is left alone by the mp3 writer, so it can
+  go stale. Harmless — every modern player prefers v2 — but worth stripping when
+  someone complains.
 
 ## Verify the claims above
 
 ```sh
-make test                                   # 48 tests
+make test                                   # 68 tests
 OMNITAG_REAL_MEDIA=~/Desktop/tp make test   # plus real-file assertions
 make xctest                                 # same suite through the Xcode scheme
 ```

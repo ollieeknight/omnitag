@@ -9,9 +9,9 @@ one side of a table only.
 | Container | Read | Write | Backend |
 |---|---|---|---|
 | m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags | AVFoundation |
-| mp3 | ✅ ID3v2 tags | ❌ (roadmap #1) | AVFoundation |
+| mp3 | ✅ ID3v2 tags | ✅ writes v2.4 | AVFoundation read, `ID3TagWriter` write |
 | wav, aiff | ✅ basic | ❌ | AVFoundation |
-| mkv | ✅ tags, chapters, cover attachments | ❌ (roadmap #2) | `MatroskaReader` |
+| mkv | ✅ tags, chapters, cover attachments | ❌ (roadmap #1) | `MatroskaReader` |
 | flac, ogg, opus | ❌ listed only | ❌ | — |
 
 `MediaTagReader.canRead` / `canWrite` encodes this; keep them in step.
@@ -61,7 +61,11 @@ filtered out on read.
 
 ## ID3v2 (`ID3KeyMap`)
 
-AVFoundation surfaces frames as `id3/TIT2`. Read-only today.
+AVFoundation surfaces frames as `id3/TIT2` on read; `ID3TagWriter` writes v2.4
+by hand. Two encodings share the format and confuse parsers: the **tag** size is
+always synchsafe (7 bits per byte), but **frame** sizes are synchsafe only in
+v2.4 — in v2.3 they are plain big-endian. Below 128 the two agree, which is why a
+short test fixture proves nothing.
 
 | Key | Frame |
 |---|---|
@@ -80,6 +84,12 @@ AVFoundation surfaces frames as `id3/TIT2`. Read-only today.
 | discNumber + discTotal | `TPOS`, same |
 
 Year frames may carry a full timestamp; the reader keeps the leading four digits.
+
+On write: always v2.4, always UTF-8 (encoding byte `0x03`), 1 KB of padding, and
+`TYER`/`TDAT`/`TIME`/`TRDA` dropped in favour of `TDRC` so a file never carries
+two answers. Frames OmniTag does not manage are copied across byte-for-byte;
+`TagKey.custom` values become `TXXX` (`description\0value`). v2.2 tags
+(three-character ids) and unsynchronised tags are refused, not rewritten.
 
 ## Matroska (`MatroskaKeyMap`)
 

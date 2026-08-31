@@ -33,6 +33,24 @@ enum ID3KeyMap {
         .year, .trackNumber, .trackTotal, .discNumber, .discTotal,
     ]
 
+    /// Frames OmniTag owns on write: everything else in a file is preserved
+    /// untouched. v2.4 spellings only — see `supersededFrameIDs`.
+    static let writeFrames: [(String, TagKey)] = [
+        ("TIT2", .title), ("TPE1", .artist), ("TPE2", .albumArtist),
+        ("TALB", .album), ("TCON", .genre), ("TCOM", .composer),
+        ("TIT1", .grouping), ("TPUB", .publisher), ("TDRC", .year),
+        ("TRCK", .trackNumber), ("TPOS", .discNumber), ("TCMP", .compilation),
+    ]
+
+    /// Frames replaced wholesale on write, so a stale value cannot linger.
+    static var managedFrameIDs: Set<String> {
+        Set(writeFrames.map(\.0)).union(supersededFrameIDs).union(["TXXX"])
+    }
+
+    /// v2.3 spellings that v2.4 replaced. Dropped on write so a file never
+    /// carries two answers to the same question.
+    static let supersededFrameIDs: Set<String> = ["TYER", "TDAT", "TIME", "TRDA"]
+
     private static let prefix = "id3/"
 
     static func frameID(fromIdentifier identifier: String) -> String? {

@@ -28,7 +28,33 @@ struct MediaTagReaderTests {
         #expect(MediaTagReader.canRead(.mp3))
         #expect(MediaTagReader.canRead(.ogg) == false)
         #expect(MediaTagReader.canWrite(.m4b))
+        #expect(MediaTagReader.canWrite(.mp3))
         #expect(MediaTagReader.canWrite(.mkv) == false, "mkv writing is not built yet")
-        #expect(MediaTagReader.canWrite(.mp3) == false, "mp3 writing is not built yet")
+        #expect(MediaTagReader.canWrite(.flac) == false)
+    }
+}
+
+@Suite("MediaTagWriter")
+struct MediaTagWriterTests {
+    @Test("routes mp3 to the ID3 writer and MPEG-4 to AVFoundation")
+    func routes() async throws {
+        let library = try FixtureLibrary()
+        let m4a = try library.makeUntagged(TwinPeaks.theme)
+        var tags = TagSet(); tags.title = "Twin Peaks Theme"
+        try await MediaTagWriter().write(tags, to: m4a)
+        #expect(try await MediaTagReader().read(m4a).tags.title == "Twin Peaks Theme")
+
+        let mp3 = ID3Builder.mp3(tag: ID3Builder.tag(frames: []))
+        defer { try? FileManager.default.removeItem(at: mp3) }
+        try await MediaTagWriter().write(tags, to: mp3)
+        let written = try #require(ID3v2.parse(try Data(contentsOf: mp3)))
+        #expect(written.frames.first { $0.id == "TIT2" }?.textValue == "Twin Peaks Theme")
+    }
+
+    @Test("refuses containers with no writer instead of failing silently")
+    func refusesUnwritable() async throws {
+        let url = try makeTestMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await #expect(throws: TagIOError.self) { try await MediaTagWriter().write(TagSet(), to: url) }
     }
 }

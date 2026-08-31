@@ -41,8 +41,9 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
    `TagKey.custom` and are written back. Dropping one is a bug, not a limitation.
 3. **Reader and writer share one key table per format** (`MPEG4KeyMap`,
    `ID3KeyMap`, `MatroskaKeyMap`). Never add a key to one side only — that is how
-   "my edit vanished on save" happens. Read through `MediaTagReader`, never a
-   concrete reader: it is what routes mkv away from AVFoundation.
+   "my edit vanished on save" happens. Go through `MediaTagReader` /
+   `MediaTagWriter`, never a concrete backend: they are what route mkv away from
+   AVFoundation and mp3 to the ID3 writer.
 4. **Offline is the default path.** Providers enrich; nothing depends on them.
    No test may touch the network.
 5. **TDD.** Test first, watch it fail, then implement.
@@ -53,8 +54,9 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 
 ```
 Sources/MediaCore     domain model. Foundation only — no AVFoundation, no SwiftUI
-Sources/TagIO         MediaTagReader (facade), AVTagReader, MatroskaReader,
-                      EBMLReader, MPEG4TagWriter, key maps, TagBackupStore
+Sources/TagIO         MediaTagReader / MediaTagWriter (facades), AVTagReader,
+                      MatroskaReader, EBMLReader, MPEG4TagWriter, ID3TagWriter,
+                      ID3v2, key maps, TagBackupStore
 Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter
 Sources/LibraryIndex  LibraryScanner
 Sources/OmniTagApp    SwiftUI shell (views live here so Previews work)

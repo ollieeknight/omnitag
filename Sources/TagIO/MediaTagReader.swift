@@ -30,6 +30,30 @@ public struct MediaTagReader: Sendable {
 
     /// Writing is narrower than reading, and saying so is the honest UI.
     public static func canWrite(_ container: ContainerFormat) -> Bool {
-        container.isMPEG4Family
+        container.isMPEG4Family || container == .mp3
+    }
+}
+
+/// The write-side twin of `MediaTagReader`: one entry point, one place that
+/// knows which backend owns which container.
+public struct MediaTagWriter: Sendable {
+    private let backups: TagBackupStore?
+
+    public init(backups: TagBackupStore? = nil) {
+        self.backups = backups
+    }
+
+    public func write(_ tags: TagSet, to url: URL) async throws {
+        guard let container = ContainerFormat(pathExtension: url.pathExtension) else {
+            throw TagIOError.unsupportedContainer(url.pathExtension)
+        }
+        switch container {
+        case .mp3:
+            try await ID3TagWriter(backups: backups).write(tags, to: url)
+        case _ where container.isMPEG4Family:
+            try await MPEG4TagWriter(backups: backups).write(tags, to: url)
+        default:
+            throw TagIOError.unsupportedContainer(container.rawValue)
+        }
     }
 }

@@ -136,6 +136,6 @@ public struct FileTagWriter: TagPersisting {
     }
 
     public func write(_ tags: TagSet, to url: URL) async throws {
-        try await MPEG4TagWriter(backups: backups).write(tags, to: url)
+        try await MediaTagWriter(backups: backups).write(tags, to: url)
     }
 }
