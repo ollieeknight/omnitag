@@ -29,7 +29,7 @@ struct MediaTagReaderTests {
         #expect(MediaTagReader.canRead(.ogg) == false)
         #expect(MediaTagReader.canWrite(.m4b))
         #expect(MediaTagReader.canWrite(.mp3))
-        #expect(MediaTagReader.canWrite(.mkv) == false, "mkv writing is not built yet")
+        #expect(MediaTagReader.canWrite(.mkv))
         #expect(MediaTagReader.canWrite(.flac) == false)
     }
 }
@@ -53,7 +53,8 @@ struct MediaTagWriterTests {
 
     @Test("refuses containers with no writer instead of failing silently")
     func refusesUnwritable() async throws {
-        let url = try makeTestMKV()
+        let url = URL.temporaryDirectory.appending(path: "\(UUID().uuidString).flac")
+        try Data("fLaC".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         await #expect(throws: TagIOError.self) { try await MediaTagWriter().write(TagSet(), to: url) }
     }

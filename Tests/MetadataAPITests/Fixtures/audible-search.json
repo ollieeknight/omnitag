@@ -1,0 +1,84 @@
+{
+ "products": [
+  {
+   "asin": "B01M62H4JK",
+   "title": "The Secret History of Twin Peaks",
+   "authors": [
+    {
+     "asin": "B000AQ72PA",
+     "name": "Mark Frost"
+    }
+   ],
+   "narrators": [
+    {
+     "name": "Amy Shiels"
+    },
+    {
+     "name": "Annie Wersching"
+    },
+    {
+     "name": "Chris Mulkey"
+    },
+    {
+     "name": "David Patrick Kelly"
+    },
+    {
+     "name": "James Morrison"
+    },
+    {
+     "name": "Kyle MacLachlan"
+    },
+    {
+     "name": "Len Cariou"
+    },
+    {
+     "name": "Mark Frost"
+    },
+    {
+     "name": "Michael Horse"
+    },
+    {
+     "name": "Robert Knepper"
+    },
+    {
+     "name": "Russ Tamblyn"
+    }
+   ],
+   "publisher_name": "Macmillan Digital Audio",
+   "release_date": "2016-10-18",
+   "issue_date": "2016-10-18",
+   "runtime_length_min": 573,
+   "language": "english",
+   "product_images": {
+    "1024": "https://m.media-amazon.com/images/I/91Jg+gCJGAL._SL1024_.jpg",
+    "500": "https://m.media-amazon.com/images/I/51d+GF+yuIL._SL500_.jpg"
+   },
+   "merchandising_summary": "From Mark Frost, co-creator of the landmark series, The Secret History of Twin Peaks tells the story that millions of fans spent twenty-five years waiting for . . . The Secret History of Twin Peaks enlarges the world created by David Lynch and Mark Frost, placing the unexplained phenomena that..."
+  },
+  {
+   "asin": "B01N0KDYR1",
+   "title": "\"Diane\u2026\": The Twin Peaks Tapes of Agent Cooper",
+   "authors": [
+    {
+     "name": "Lynch Frost Productions"
+    }
+   ],
+   "narrators": [
+    {
+     "name": "Kyle MacLachlan"
+    }
+   ],
+   "publisher_name": "Simon & Schuster Audio",
+   "release_date": "2016-12-27",
+   "issue_date": "2016-12-27",
+   "runtime_length_min": 45,
+   "language": "english",
+   "product_images": {
+    "1024": "https://m.media-amazon.com/images/I/A1SvaQsedOL._SL1024_.jpg",
+    "500": "https://m.media-amazon.com/images/I/61PC67FML-L._SL500_.jpg"
+   },
+   "merchandising_summary": "GRAMMY AWARD NOMINEE FOR BEST SPOKEN WORD ALBUM! Unavailable in any other format\u2014the original blockbuster audio tie-in to the television phenomenon Twin Peaks. \u201c...Diane, I\u2019m holding in my hand, a small box of chocolate bunnies...\u201d Re-experience the mystery of Twin Peaks. The Cooper..."
+  }
+ ],
+ "total_results": 2
+}

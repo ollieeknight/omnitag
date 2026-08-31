@@ -60,6 +60,25 @@ enum MatroskaKeyMap {
         }
     }
 
+    /// Write direction: the name and target level a key belongs at. Mirrors
+    /// `key(for:targetLevel:)` so a written file reads back identically.
+    static func writeName(for key: TagKey) -> (name: String, level: Int)? {
+        switch key {
+        case .showName: ("TITLE", collectionLevel)
+        case .seriesIndex: ("PART_NUMBER", collectionLevel)
+        case .seasonNumber: ("PART_NUMBER", seasonLevel)
+        case .title: ("TITLE", defaultTargetLevel)
+        case .episodeNumber: ("PART_NUMBER", defaultTargetLevel)
+        case .album: ("ALBUM", seasonLevel)
+        case .custom(let name):
+            name.hasPrefix("mkv/")
+                ? (String(name.dropFirst(4)), defaultTargetLevel)
+                : (name.uppercased(), defaultTargetLevel)
+        default:
+            names.first { $0.value == key }.map { ($0.key, defaultTargetLevel) }
+        }
+    }
+
     /// Matroska dates are ISO-ish (`1990-04-08`); keep the year.
     static func value(_ string: String, for key: TagKey) -> TagValue {
         guard numericKeys.contains(key) else { return .string(string) }

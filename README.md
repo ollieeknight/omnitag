@@ -7,9 +7,9 @@ TV. Mp3tag's job, wider scope, no cloud.
 
 Phases 1–4: domain model, folder scan, MPEG-4 read/write, ID3 read, **Matroska
 read** (hand-written EBML parser — AVFoundation cannot open mkv at all),
-chapter read, **mp3 writing** (hand-rolled ID3v2.4), tag backups, undo/redo,
-batch editing, and a three-pane SwiftUI browser. Artwork editing, metadata
-providers and mkv writing are still to come
+chapter read, **mp3 writing** (hand-rolled ID3v2.4), **mkv writing** (in-place
+EBML patch), tag backups, undo/redo, batch editing, and a three-pane SwiftUI
+browser. Artwork editing and metadata providers are still to come
 — see `docs/ARCHITECTURE.md`.
 
 Writes are staged: temp file in the same directory, re-read to prove it is
@@ -31,7 +31,7 @@ playable, then an atomic swap, with the previous tags archived to JSON first.
 ## Run
 
 ```sh
-make test    # 68 tests, no network, ~1s
+make test    # 84 tests, no network, ~1s
 make run     # launch the app
 make xcode   # generate and open OmniTag.xcodeproj
 make app     # assemble .build/OmniTag.app
@@ -60,11 +60,12 @@ write path lands.
 | Music | mp3 (ID3), m4a, wav, aiff | m4a ✅, mp3 ✅ (ID3v2.4) |
 | Audiobook | m4b, incl. chapters | m4b ✅ (chapters phase 4) |
 | Video | mp4, mov, m4v | mp4, mov, m4v ✅ |
-| Movie / TV (mkv) | tags, chapters, cover attachments | phase 5 |
+| Movie / TV (mkv) | tags, chapters, cover attachments | tags ✅ (in-place) |
 | flac, ogg, opus | scanned, not yet parsed | phase 5 |
 
 mkv is read by `MatroskaReader`, which memory-maps the file and skips Clusters
-by size: a 7 GB film parses in ~30 ms without loading the video.
+by size, and written by `MatroskaTagWriter`, which patches a few hundred bytes in
+place rather than remuxing: a 6.5 GB film is retagged in ~32 ms.
 
 ## Layout
 

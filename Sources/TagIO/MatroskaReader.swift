@@ -54,7 +54,7 @@ public struct MatroskaReader: Sendable {
         guard let headerSize = try? reader.readSize() else {
             throw TagIOError.unreadable(url, "unreadable EBML header")
         }
-        reader.skip(Int(headerSize ?? 0))
+        reader.skip(Int(headerSize))
 
         guard let segmentID = try? reader.readElementID(), segmentID == ID.segment,
               (try? reader.readSize()) != nil
@@ -99,7 +99,9 @@ public struct MatroskaReader: Sendable {
             guard let elementID = try? reader.readElementID(),
                   let sizeValue = try? reader.readSize()
             else { return }
-            let size = Int(sizeValue ?? UInt64(max(0, end - reader.offset)))
+            // `try?` above already collapses an unknown ("all ones") size into a
+            // parse stop, so by here the size is concrete.
+            let size = Int(sizeValue)
             let bodyEnd = min(end, reader.offset + size)
 
             switch elementID {

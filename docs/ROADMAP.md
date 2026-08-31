@@ -18,33 +18,17 @@ intact, duration unchanged.
 
 ---
 
-## 1. mkv writing — in-place element rewrite
+## ✅ Done: mkv writing (in-place element patch)
 
-**The hard constraint:** these files are gigabytes. A remux to change a title is
-unacceptable. Matroska anticipates this: `Void` elements are padding that can be
-grown and shrunk.
+`EBMLWriter` (VINT/element/Void serialisation) and `MatroskaTagWriter`. Three
+cases, all seek-and-write: the new `Tags` element fits the old region plus any
+adjacent `Void` (overwrite, pad the slack); it is the last element (overwrite,
+change the file length); it fits nowhere (append at the end, blank the old one to
+`Void`, repair the `SeekHead` entry). Segment size is rewritten in place. The
+file is never copied: 8 ms on the 1.3 GB episode, 32 ms on the 6.5 GB film,
+verified with `ffprobe` — durations unchanged, chapters intact, tags readable.
 
-**Approach:**
-
-- Locate the existing `Tags` element (and `Chapters` if editing those). If the
-  new serialised element fits in the old element plus any adjacent `Void`,
-  overwrite in place and adjust the `Void` to absorb the difference.
-- If it does not fit, append a new `Tags` element at the end of the Segment,
-  turn the old one into `Void`, and update `SeekHead` if present. This is what
-  `mkvpropedit` does.
-- The Segment's declared size may need updating when appending. If the size is
-  "unknown" (all-ones VINT), nothing to do.
-- Never touch Clusters. Never rewrite the whole file.
-- The write must still stage and verify: copy nothing, but re-parse the modified
-  file before considering the write successful, and keep the tag backup.
-
-**Tests first:** synthetic mkv fixtures from `EBMLBuilder` (already in the test
-suite) covering: fits-in-place, needs-append, no-existing-Tags-element, and a
-Void-adjacent case. Then the real-file test on a **copy** of Fire Walk with Me.
-
----
-
-## 2. Artwork editing
+## 1. Artwork editing
 
 Read exists (`Artwork` on `MediaItem`). Needed: add, replace, remove, and a
 drag-and-drop well in the inspector. MPEG-4 uses the `covr` atom; mkv uses an
@@ -53,7 +37,14 @@ poster in every file is how libraries balloon.
 
 ---
 
-## 3. Metadata providers
+## 1b. The audiobook wizard (in progress — see `AUDIOBOOKS.md`)
+
+`MetadataAPI` is done and verified live. Remaining, in order: tag diff model
+with merge/overwrite-selected/overwrite-all, artwork download and `covr`
+writing, the drag-and-drop + search + diff wizard UI, then chapter editing
+(recommendation: `AVAssetWriter` remux first, `chpl` fast path later).
+
+## 2. Metadata providers
 
 `MetadataProvider` protocol per `ARCHITECTURE.md`. Order matters:
 
@@ -71,14 +62,15 @@ must stay fully functional — providers enrich, nothing depends on them.
 
 ---
 
-## 4. Chapter editing
+## 3. Chapter editing
 
 Editing titles and times for m4b/mp4 (chapter track rewrite via `AVAssetWriter`)
-and mkv (element rewrite, see #1). Depends on #1 landing first for the mkv half.
+and mkv (`Chapters` element, using the same patch machinery `MatroskaTagWriter`
+already has — this half is now mostly plumbing).
 
 ---
 
-## 5. Filename ↔ tag conversion
+## 4. Filename ↔ tag conversion
 
 Two directions, both Mp3tag staples:
 
@@ -89,7 +81,7 @@ Two directions, both Mp3tag staples:
 
 ---
 
-## 6. flac and ogg/opus
+## 5. flac and ogg/opus
 
 Vorbis comments — a simple `KEY=value` list, roughly 60 lines to read and write.
 flac also has a `PICTURE` block for artwork. Lowest priority: no such files in

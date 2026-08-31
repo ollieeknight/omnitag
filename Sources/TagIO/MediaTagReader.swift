@@ -30,7 +30,7 @@ public struct MediaTagReader: Sendable {
 
     /// Writing is narrower than reading, and saying so is the honest UI.
     public static func canWrite(_ container: ContainerFormat) -> Bool {
-        container.isMPEG4Family || container == .mp3
+        container.isMPEG4Family || container == .mp3 || container == .mkv
     }
 }
 
@@ -50,6 +50,8 @@ public struct MediaTagWriter: Sendable {
         switch container {
         case .mp3:
             try await ID3TagWriter(backups: backups).write(tags, to: url)
+        case .mkv:
+            try await MatroskaTagWriter(backups: backups).write(tags, to: url)
         case _ where container.isMPEG4Family:
             try await MPEG4TagWriter(backups: backups).write(tags, to: url)
         default:

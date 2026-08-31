@@ -1,0 +1,47 @@
+{
+ "asin": "B01M11U23O",
+ "brandIntroDurationMs": 2043,
+ "brandOutroDurationMs": 5062,
+ "chapters": [
+  {
+   "lengthMs": 209537,
+   "startOffsetMs": 0,
+   "startOffsetSec": 0,
+   "title": "Chapter 1"
+  },
+  {
+   "lengthMs": 192540,
+   "startOffsetMs": 209537,
+   "startOffsetSec": 210,
+   "title": "Chapter 2"
+  },
+  {
+   "lengthMs": 339894,
+   "startOffsetMs": 402077,
+   "startOffsetSec": 402,
+   "title": "Chapter 3"
+  },
+  {
+   "lengthMs": 123902,
+   "startOffsetMs": 741971,
+   "startOffsetSec": 742,
+   "title": "Chapter 4"
+  },
+  {
+   "lengthMs": 613889,
+   "startOffsetMs": 865873,
+   "startOffsetSec": 866,
+   "title": "Chapter 5"
+  },
+  {
+   "lengthMs": 95945,
+   "startOffsetMs": 1479762,
+   "startOffsetSec": 1480,
+   "title": "Chapter 6"
+  }
+ ],
+ "isAccurate": true,
+ "region": "us",
+ "runtimeLengthMs": 24145547,
+ "runtimeLengthSec": 24146
+}

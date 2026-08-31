@@ -11,7 +11,7 @@ one side of a table only.
 | m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags | AVFoundation |
 | mp3 | ✅ ID3v2 tags | ✅ writes v2.4 | AVFoundation read, `ID3TagWriter` write |
 | wav, aiff | ✅ basic | ❌ | AVFoundation |
-| mkv | ✅ tags, chapters, cover attachments | ❌ (roadmap #1) | `MatroskaReader` |
+| mkv | ✅ tags, chapters, cover attachments | ✅ tags (in-place patch) | `MatroskaReader` / `MatroskaTagWriter` |
 | flac, ogg, opus | ❌ listed only | ❌ | — |
 
 `MediaTagReader.canRead` / `canWrite` encodes this; keep them in step.
@@ -125,9 +125,33 @@ the work, and they polluted the tag set until filtered.
 61A7     AttachedFile     4660     FileMimeType   465C     FileData
 ```
 
-Everything else — Clusters, Tracks, Cues, SeekHead — is skipped by size and
-never read. Chapter times are absolute **nanoseconds**, independent of
+Void (`EC`) is padding, legal anywhere, and the mechanism that makes in-place
+editing possible. `SeekHead` (`114D9B74`) holds `Seek` (`4DBB`) entries of
+`SeekID` (`53AB`) + `SeekPosition` (`53AC`), which must be repaired when an
+element moves — a stale pointer is worse than none.
+
+Everything else — Clusters, Tracks, Cues — is skipped by size and never read. Chapter times are absolute **nanoseconds**, independent of
 TimestampScale; the Duration in `Info` is in TimestampScale ticks.
+
+### Writing mkv
+
+Never remux. `MatroskaTagWriter` plans a set of byte patches and applies them
+with `FileHandle`, so cost is independent of file size:
+
+| Situation | What happens |
+|---|---|
+| New element ≤ old region + following `Void` | Overwrite in place, pad the slack with `Void` |
+| Old element is last in the file | Overwrite, then grow or truncate the file |
+| Neither | Append at the end, blank the old region to `Void`, repair `SeekHead` |
+
+The Segment's own size VINT is rewritten in place; its width cannot change, so a
+file whose size field is too narrow to describe the new length is refused rather
+than corrupted. A one-byte gap cannot hold a `Void` (minimum two bytes), which is
+why `EBMLWriter.size` can force a wider-than-minimal encoding.
+
+Ordering matters for crash safety: the new element is appended **before** the old
+one is blanked, so an interrupted write leaves the original element intact and
+the appended bytes outside the declared Segment, where they are ignored.
 
 ## Adding a format
 

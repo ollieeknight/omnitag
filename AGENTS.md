@@ -15,6 +15,7 @@ Read these before writing anything. They are short and they are current.
 | `docs/DECISIONS.md` | settled questions — do not re-litigate these |
 | `docs/DEVELOPMENT.md` | build, test, Xcode, real-media testing |
 | `docs/DISTRIBUTION.md` | Homebrew and signing |
+| `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the audiobook wizard |
 
 "Read the docs and do X" means: those seven, then X. If X is not in the roadmap,
 say where it fits before starting.
@@ -33,10 +34,13 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 
 ## Non-negotiables
 
-1. **Never corrupt a user's media.** Every write stages to a sibling temp file,
-   re-reads it to prove it is playable, then `replaceItemAt`. Previous tags are
-   archived to `TagBackupStore` first. Tempted to write in place to save a copy?
-   Don't.
+1. **Never corrupt a user's media.** MPEG-4 and mp3 writes stage to a sibling
+   temp file, re-read it to prove it is playable, then `replaceItemAt`. mkv is
+   the deliberate exception: the file is patched in place, because staging a 6 GB
+   film to change a title is the cost that design exists to avoid — there, safety
+   comes from patching only outside the Clusters, archiving the previous tags
+   first, and re-parsing immediately afterwards. Either way, `TagBackupStore`
+   runs before the first byte is written.
 2. **Tags round-trip losslessly.** Unknown atoms and frames become
    `TagKey.custom` and are written back. Dropping one is a bug, not a limitation.
 3. **Reader and writer share one key table per format** (`MPEG4KeyMap`,
@@ -45,7 +49,8 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
    `MediaTagWriter`, never a concrete backend: they are what route mkv away from
    AVFoundation and mp3 to the ID3 writer.
 4. **Offline is the default path.** Providers enrich; nothing depends on them.
-   No test may touch the network.
+   No test may touch the network — except the opt-in `LiveAPITests`, which run
+   only under `OMNITAG_LIVE=1` and exist to catch the API lying to us.
 5. **TDD.** Test first, watch it fail, then implement.
 6. **Never write to the developer's real media in a test.** Copy to a temp
    directory first. `~/Desktop/tp` holds their Twin Peaks files.
@@ -55,9 +60,10 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 ```
 Sources/MediaCore     domain model. Foundation only — no AVFoundation, no SwiftUI
 Sources/TagIO         MediaTagReader / MediaTagWriter (facades), AVTagReader,
-                      MatroskaReader, EBMLReader, MPEG4TagWriter, ID3TagWriter,
-                      ID3v2, key maps, TagBackupStore
+                      MatroskaReader + MatroskaTagWriter, EBMLReader/EBMLWriter,
+                      MPEG4TagWriter, ID3TagWriter, ID3v2, key maps, TagBackupStore
 Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter
+Sources/MetadataAPI   AudibleClient, AudnexusClient, AudiobookMetadataService
 Sources/LibraryIndex  LibraryScanner
 Sources/OmniTagApp    SwiftUI shell (views live here so Previews work)
 Tests/                Swift Testing
