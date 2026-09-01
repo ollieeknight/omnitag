@@ -57,3 +57,27 @@ struct ContainerFormatTests {
         #expect(ContainerFormat(pathExtension: "") == nil)
     }
 }
+
+@Suite("Artwork MIME sniffing")
+struct ArtworkSniffTests {
+    private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + [UInt8](repeating: 0, count: 8))
+    private let webp = Data([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0, 0])
+
+    @Test("recognises the formats a cover actually arrives in")
+    func recognisesFormats() {
+        #expect(Artwork.sniffMimeType(png) == "image/png")
+        #expect(Artwork.sniffMimeType(webp) == "image/webp")
+        #expect(Artwork.sniffMimeType(Data([0x47, 0x49, 0x46, 0x38])) == "image/gif")
+        #expect(Artwork.sniffMimeType(Data([0xFF, 0xD8, 0xFF])) == "image/jpeg")
+        #expect(Artwork.sniffMimeType(Data()) == "image/jpeg")
+    }
+
+    @Test("a Data slice sniffs the same as a fresh Data")
+    func sliceIsIndexedFromItsOwnStart() {
+        // Covers arrive as slices of a parsed frame; absolute indexing would
+        // read the wrong bytes here, or trap.
+        let sliced = (Data(repeating: 0xAA, count: 100) + webp).dropFirst(100)
+        #expect(Artwork.sniffMimeType(sliced) == "image/webp")
+        #expect(Artwork.sniffMimeType((Data([0x00]) + png).dropFirst()) == "image/png")
+    }
+}

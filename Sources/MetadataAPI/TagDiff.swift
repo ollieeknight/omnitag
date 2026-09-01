@@ -42,6 +42,39 @@ public struct TagDiff: Sendable {
         return result
     }
 
+    /// The ticked rows, as a delta ready to merge into each selected file.
+    /// A row edited down to an empty string is a row the user wants left alone,
+    /// not a tag they want written blank — the wizard has no "clear" action.
+    public func delta(for keys: Set<TagKey>) -> TagSet {
+        var result = TagSet()
+        for row in rows where keys.contains(row.key) {
+            guard let proposed = row.proposed else { continue }
+            if let text = proposed.stringValue, text.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            result[row.key] = proposed
+        }
+        return result
+    }
+
+    /// Keys the wizard should tick for each of the three spec'd actions.
+    public func keys(for action: MergeAction) -> Set<TagKey> {
+        switch action {
+        case .merge: Set(rows.filter { $0.current == nil && $0.proposed != nil }.map(\.key))
+        case .overwriteAll: Set(rows.filter { $0.proposed != nil }.map(\.key))
+        case .none: []
+        }
+    }
+
+    public enum MergeAction: String, Sendable, CaseIterable, Identifiable {
+        /// Fill only what the file does not already have.
+        case merge = "Fill empty"
+        /// Take every field the provider supplied.
+        case overwriteAll = "Take all"
+        /// Write nothing; start ticking by hand.
+        case none = "None"
+
+        public var id: String { rawValue }
+    }
+
     /// Replace the tag set entirely with the provider's values.
     public func overwriteAll() -> TagSet {
         TagSet(Dictionary(uniqueKeysWithValues: rows.compactMap { row in
@@ -103,6 +136,68 @@ public struct ChapterDiff: Sendable {
             let title = row.current?.title ?? proposed.title
             return Chapter(index: offset, start: proposed.start, duration: proposed.duration, title: title)
         }
+    }
+
+    /// How the chapters step reconciles the file's chapters with the provider's.
+    /// Applied to the rows themselves rather than to the result, so the table the
+    /// user edits is the table that gets written — picking a strategy after
+    /// hand-editing a title used to silently discard the edit.
+    public enum MergeStrategy: String, Sendable, CaseIterable, Identifiable {
+        case takeTheirs = "Take their chapters"
+        case keepMine = "Keep mine, add extras"
+        case keepTitlesTakeTimes = "Keep my titles, take their times"
+
+        public var id: String { rawValue }
+    }
+
+    /// The rows rewritten so `proposed` is what the strategy would write.
+    public func applying(_ strategy: MergeStrategy) -> ChapterDiff {
+        var copy = self
+        let resolved: [Chapter]
+        switch strategy {
+        case .takeTheirs: resolved = takeTheirs()
+        case .keepMine: resolved = keepMine()
+        case .keepTitlesTakeTimes: resolved = keepTitlesTakeTimes()
+        }
+        copy.rows = copy.rows.enumerated().map { offset, row in
+            var updated = row
+            updated.proposed = offset < resolved.count ? resolved[offset] : nil
+            return updated
+        }
+        return copy
+    }
+
+    /// What the wizard will write: whatever the (possibly hand-edited) rows say.
+    public var resolved: [Chapter] {
+        rows.compactMap { row in
+            row.proposed.map { Chapter(index: row.index, start: $0.start, duration: $0.duration, title: $0.title) }
+        }
+    }
+
+    /// Retitle every row. `%n%` becomes the 1-based index, `%title%` the title
+    /// the row already carries — an 85-chapter book is not renamed by hand.
+    public func renamingAll(with pattern: String) -> ChapterDiff {
+        var copy = self
+        copy.rows = copy.rows.enumerated().map { offset, row in
+            guard let proposed = row.proposed else { return row }
+            var updated = row
+            updated.proposed?.title = pattern
+                .replacingOccurrences(of: "%n%", with: String(offset + 1))
+                .replacingOccurrences(of: "%title%", with: proposed.title)
+            return updated
+        }
+        return copy
+    }
+
+    /// Move every start time, for the intro a provider did not account for.
+    public func shiftingAll(by offset: TimeInterval) -> ChapterDiff {
+        var copy = self
+        copy.rows = copy.rows.map { row in
+            var updated = row
+            if let start = row.proposed?.start { updated.proposed?.start = max(0, start + offset) }
+            return updated
+        }
+        return copy
     }
 
     /// Apply a rename pattern to every chapter. `%n%` becomes the 1-based index.

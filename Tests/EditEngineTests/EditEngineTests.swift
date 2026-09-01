@@ -141,3 +141,244 @@ struct EditEngineTests {
         #expect(await engine.item(at: urls[1])?.tags.title == "Laura Palmer")
     }
 }
+
+@Suite("EditEngine snapshot (the wizard path)")
+struct EditEngineSnapshotTests {
+    private func item(_ name: String, tags: TagSet, artwork: [Artwork] = [], chapters: [Chapter] = []) -> MediaItem {
+        MediaItem(
+            url: URL(filePath: "/library/\(name).m4b"), kind: .audiobook,
+            container: .m4b, tags: tags, chapters: chapters, artwork: artwork)
+    }
+
+    private func tagged(_ pairs: [TagKey: TagValue]) -> TagSet { TagSet(pairs) }
+
+    @Test("a snapshot merges the provider's keys without erasing per-file tags")
+    func snapshotIsADelta() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([
+            item("part1", tags: tagged([.title: .string("Part 1"), .trackNumber: .number(1)])),
+            item("part2", tags: tagged([.title: .string("Part 2"), .trackNumber: .number(2)])),
+        ])
+
+        await engine.applySnapshot(
+            tags: tagged([.author: .string("Jennifer Lynch"), .asin: .string("B01M11U23O")]),
+            artwork: [], chapters: nil,
+            to: [URL(filePath: "/library/part1.m4b"), URL(filePath: "/library/part2.m4b")])
+
+        let one = await engine.item(at: URL(filePath: "/library/part1.m4b"))
+        let two = await engine.item(at: URL(filePath: "/library/part2.m4b"))
+        #expect(one?.tags[.author]?.stringValue == "Jennifer Lynch")
+        #expect(two?.tags[.asin]?.stringValue == "B01M11U23O")
+        // The per-file fields the provider said nothing about must survive.
+        #expect(one?.tags.title == "Part 1")
+        #expect(two?.tags[.trackNumber]?.intValue == 2)
+    }
+
+    @Test("a snapshot with no artwork leaves the existing cover alone")
+    func emptyArtworkDoesNotWipe() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        let cover = Artwork(data: Data([0xFF, 0xD8, 0xFF]), mimeType: "image/jpeg")
+        await engine.load([item("book", tags: tagged([.title: .string("Book")]), artwork: [cover])])
+
+        await engine.applySnapshot(
+            tags: tagged([.author: .string("A")]), artwork: [], chapters: nil,
+            to: [URL(filePath: "/library/book.m4b")])
+
+        let book = await engine.item(at: URL(filePath: "/library/book.m4b"))
+        #expect(book?.artwork == [cover])
+    }
+
+    @Test("a snapshot with artwork replaces the cover")
+    func artworkReplaces() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        let old = Artwork(data: Data([0xFF, 0xD8]), mimeType: "image/jpeg")
+        let new = Artwork(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")
+        await engine.load([item("book", tags: TagSet(), artwork: [old])])
+
+        await engine.applySnapshot(
+            tags: TagSet(), artwork: [new], chapters: nil,
+            to: [URL(filePath: "/library/book.m4b")])
+
+        #expect(await engine.item(at: URL(filePath: "/library/book.m4b"))?.artwork == [new])
+    }
+
+    @Test("undo restores tags, artwork and chapters in one step")
+    func undoRestoresEverything() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        let old = Artwork(data: Data([0xFF, 0xD8]), mimeType: "image/jpeg")
+        let chapter = Chapter(index: 0, start: 0, title: "One")
+        await engine.load([
+            item("book", tags: tagged([.title: .string("Old")]), artwork: [old], chapters: [chapter])
+        ])
+
+        await engine.applySnapshot(
+            tags: tagged([.title: .string("New")]),
+            artwork: [Artwork(data: Data([0x89, 0x50]), mimeType: "image/png")],
+            chapters: [Chapter(index: 0, start: 0, title: "Uno")],
+            to: [URL(filePath: "/library/book.m4b")])
+        await engine.undo()
+
+        let book = await engine.item(at: URL(filePath: "/library/book.m4b"))
+        #expect(book?.tags.title == "Old")
+        #expect(book?.artwork == [old])
+        #expect(book?.chapters == [chapter])
+    }
+
+    @Test("a snapshot that changes nothing does not push an undo step")
+    func noOpSnapshot() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("book", tags: tagged([.title: .string("Same")]))])
+
+        await engine.applySnapshot(
+            tags: tagged([.title: .string("Same")]), artwork: [], chapters: nil,
+            to: [URL(filePath: "/library/book.m4b")])
+
+        #expect(await engine.canUndo == false)
+    }
+}
+
+@Suite("EditEngine incremental import")
+struct EditEngineImportTests {
+    private func item(_ name: String) -> MediaItem {
+        var tags = TagSet(); tags.title = name
+        return MediaItem(
+            url: URL(filePath: "/library/\(name).m4a"), kind: .music,
+            container: .m4a, tags: tags)
+    }
+
+    @Test("adding files keeps earlier unsaved edits dirty and undoable")
+    func addingDoesNotResetTheBaseline() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a")])
+        await engine.apply(.set(.genre, .string("Soundtrack")), to: [URL(filePath: "/library/a.m4a")])
+
+        await engine.add([item("b")])
+
+        #expect(await engine.dirtyURLs == [URL(filePath: "/library/a.m4a")])
+        #expect(await engine.canUndo)
+        #expect(await engine.allItems.count == 2)
+    }
+
+    @Test("adding a file already in the library does not duplicate or reset it")
+    func addingIsIdempotent() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a")])
+        await engine.apply(.set(.genre, .string("Jazz")), to: [URL(filePath: "/library/a.m4a")])
+
+        await engine.add([item("a")])
+
+        #expect(await engine.allItems.count == 1)
+        #expect(await engine.allItems.first?.tags[.genre]?.stringValue == "Jazz")
+    }
+}
+
+@Suite("EditEngine artwork, removal and save progress")
+struct EditEngineLibraryTests {
+    private func item(_ name: String, artwork: [Artwork] = []) -> MediaItem {
+        var tags = TagSet(); tags.title = name
+        return MediaItem(
+            url: URL(filePath: "/library/\(name).m4b"), kind: .audiobook,
+            container: .m4b, tags: tags, artwork: artwork)
+    }
+    private func url(_ name: String) -> URL { URL(filePath: "/library/\(name).m4b") }
+
+    private let cover = Artwork(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")
+
+    @Test("setting artwork across a selection is one undoable batch")
+    func setArtwork() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+
+        await engine.setArtwork([cover], to: [url("a"), url("b")])
+
+        #expect(await engine.item(at: url("a"))?.artwork == [cover])
+        #expect(await engine.dirtyURLs.count == 2)
+        await engine.undo()
+        #expect(await engine.item(at: url("b"))?.artwork.isEmpty == true)
+    }
+
+    @Test("clearing artwork is distinct from leaving it alone")
+    func clearArtwork() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a", artwork: [cover])])
+
+        await engine.setArtwork([], to: [url("a")])
+
+        #expect(await engine.item(at: url("a"))?.artwork.isEmpty == true)
+    }
+
+    @Test("removing files drops them and their pending edits")
+    func removeFiles() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+        await engine.apply(.set(.genre, .string("Mystery")), to: [url("a")])
+
+        await engine.remove([url("a")])
+
+        #expect(await engine.allItems.map(\.url) == [url("b")])
+        #expect(await engine.dirtyURLs.isEmpty)
+    }
+
+    @Test("save reports progress once per file, in order")
+    func saveProgress() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+        await engine.apply(.set(.genre, .string("Mystery")), to: [url("a"), url("b")])
+
+        let recorder = ProgressRecorder()
+        _ = try await engine.save { url, done, total in
+            Task { await recorder.record(url, done, total) }
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await recorder.steps.map(\.1) == [1, 2])
+        #expect(await recorder.steps.allSatisfy { $0.2 == 2 })
+    }
+}
+
+actor ProgressRecorder {
+    private(set) var steps: [(URL, Int, Int)] = []
+    func record(_ url: URL, _ done: Int, _ total: Int) { steps.append((url, done, total)) }
+}
+
+@Suite("EditEngine removal keeps surviving history")
+struct EditEngineRemovalTests {
+    private func item(_ name: String) -> MediaItem {
+        MediaItem(url: URL(filePath: "/library/\(name).m4b"), kind: .audiobook, container: .m4b)
+    }
+    private func url(_ name: String) -> URL { URL(filePath: "/library/\(name).m4b") }
+
+    @Test("removing one file of a batch leaves the other file's undo intact")
+    func batchSurvivesPartialRemoval() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+        await engine.apply(.set(.genre, .string("Mystery")), to: [url("a"), url("b")])
+
+        await engine.remove([url("a")])
+        await engine.undo()
+
+        #expect(await engine.item(at: url("b"))?.tags[.genre] == nil)
+        #expect(await engine.canRedo)
+    }
+
+    @Test("a batch that touched only removed files disappears entirely")
+    func fullyRemovedBatchIsDropped() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+        await engine.apply(.set(.genre, .string("Mystery")), to: [url("a")])
+
+        await engine.remove([url("a")])
+
+        #expect(await engine.canUndo == false)
+    }
+
+    @Test("removal reports whether unsaved work was about to be thrown away")
+    func removalReportsUnsavedWork() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item("a"), item("b")])
+        await engine.apply(.set(.genre, .string("Mystery")), to: [url("a")])
+
+        #expect(await engine.unsavedCount(among: [url("a"), url("b")]) == 1)
+        #expect(await engine.unsavedCount(among: [url("b")]) == 0)
+    }
+}

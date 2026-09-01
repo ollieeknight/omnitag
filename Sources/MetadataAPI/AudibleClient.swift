@@ -18,7 +18,7 @@ public struct AudibleClient: Sendable {
     private static let responseGroups =
         "contributors,product_desc,product_attrs,media,series"
 
-    public func search(_ query: AudiobookQuery, limit: Int = 20) async throws -> [AudiobookCandidate] {
+    public func search(_ query: MetadataQuery, limit: Int = 20) async throws -> [MetadataCandidate] {
         // An ASIN is an exact identifier, not a search term, so it is answered
         // before the query is judged empty — it carries no keywords by design.
         if let asin = query.asin, !asin.isEmpty { return [try await product(asin: asin)] }
@@ -48,7 +48,7 @@ public struct AudibleClient: Sendable {
     }
 
     /// The by-ASIN endpoint, which returns one product rather than a search.
-    public func product(asin: String) async throws -> AudiobookCandidate {
+    public func product(asin: String) async throws -> MetadataCandidate {
         var components = URLComponents()
         components.scheme = "https"
         components.host = region.apiHost
@@ -94,9 +94,9 @@ public struct AudibleClient: Sendable {
         var merchandisingSummary: String?
         var productImages: [String: String]?
 
-        var candidate: AudiobookCandidate {
-            AudiobookCandidate(
-                asin: asin, title: title, subtitle: subtitle,
+        var candidate: MetadataCandidate {
+            MetadataCandidate(
+                id: asin, title: title, subtitle: subtitle,
                 authors: authors?.map(\.name) ?? [],
                 narrators: narrators?.map(\.name) ?? [],
                 publisher: publisherName,

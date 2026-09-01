@@ -1,5 +1,5 @@
 public enum MediaKind: String, Sendable, CaseIterable, Codable, Hashable {
-    case music, audiobook, movie, tvEpisode
+    case music, audiobook, book, movie, tvEpisode
 }
 
 /// A container we can open. Extension-driven: cheap, and correct for a library
@@ -8,6 +8,7 @@ public enum MediaKind: String, Sendable, CaseIterable, Codable, Hashable {
 public enum ContainerFormat: String, Sendable, CaseIterable, Codable, Hashable {
     case mp3, m4a, m4b, flac, wav, aiff, ogg, opus, aac
     case mp4, mkv, mov, m4v, avi
+    case epub, pdf
 
     public init?(pathExtension: String) {
         guard !pathExtension.isEmpty,
@@ -19,8 +20,18 @@ public enum ContainerFormat: String, Sendable, CaseIterable, Codable, Hashable {
     public var defaultKind: MediaKind {
         switch self {
         case .m4b: .audiobook
+        case .epub, .pdf: .book
         case .mp4, .mkv, .mov, .m4v, .avi: .movie
         default: .music
+        }
+    }
+
+    /// Whether the file has a playable duration at all. A book does not, so
+    /// nothing should ask it for one — or print a Length for it.
+    public var isTimeBased: Bool {
+        switch self {
+        case .epub, .pdf: false
+        default: true
         }
     }
 

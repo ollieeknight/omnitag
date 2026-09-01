@@ -4,7 +4,7 @@ import MediaCore
 /// What the user is looking for. Either a structured search (the fields Audible
 /// indexes separately) or free-text keywords — never both, because Audible
 /// ignores the structured fields when `keywords` is present.
-public struct AudiobookQuery: Sendable, Equatable {
+public struct MetadataQuery: Sendable, Equatable {
     public var keywords: String?
     public var title: String?
     public var author: String?
@@ -50,9 +50,29 @@ public struct AudiobookQuery: Sendable, Equatable {
 
     public var searchTerms: String { searchLadder.first ?? "" }
 
+    /// What the wizard's one search field reads and writes. An ASIN or an
+    /// Audible link is routed to `asin` rather than to `keywords`, because the
+    /// catalogue has books the keyword index cannot reach — pasting the link is
+    /// the documented way to get at them, and searching for the URL as text
+    /// finds nothing.
+    public var searchText: String {
+        get { asin ?? searchTerms }
+        set {
+            if let found = Self.asin(fromPastedText: newValue) {
+                asin = found
+                keywords = nil
+            } else {
+                asin = nil
+                keywords = newValue
+            }
+            title = nil
+            author = nil
+        }
+    }
+
     /// How well a result matches what the user actually asked for. Audible's
     /// relevance ordering ignores the author entirely, so this does not.
-    public func score(_ candidate: AudiobookCandidate) -> Int {
+    public func score(_ candidate: MetadataCandidate) -> Int {
         var score = 0
         let wanted = (title ?? keywords ?? "").lowercased()
         let found = candidate.title.lowercased()
@@ -119,9 +139,10 @@ public struct AudiobookQuery: Sendable, Equatable {
 }
 
 /// One search hit, enough to show a row and fetch the rest.
-public struct AudiobookCandidate: Sendable, Identifiable, Equatable {
-    public var id: String { asin }
-    public var asin: String
+public struct MetadataCandidate: Sendable, Identifiable, Equatable {
+    /// Provider-scoped: an Audible ASIN, an OpenLibrary `/works/` key. Only the
+    /// provider that issued it can look it up again.
+    public var id: String
     public var title: String
     public var subtitle: String?
     public var authors: [String]
@@ -134,6 +155,13 @@ public struct AudiobookCandidate: Sendable, Identifiable, Equatable {
     public var summary: String?
     public var artworkURL: URL?
 
+    /// Shown beside the year in a result row. OpenLibrary's `/works/OL123W`
+    /// keys mean nothing to a reader, so they are not shown; an ASIN is a
+    /// thing people paste and recognise.
+    public var displayID: String? {
+        id.hasPrefix("/") ? nil : id
+    }
+
     public var byline: String {
         let people = authors.isEmpty ? narrators : authors
         return people.joined(separator: ", ")
@@ -141,13 +169,13 @@ public struct AudiobookCandidate: Sendable, Identifiable, Equatable {
 }
 
 /// A book with everything a tag write needs.
-public struct AudiobookDetails: Sendable, Equatable {
-    public var book: AudiobookBook
+public struct MetadataDetails: Sendable, Equatable {
+    public var book: MetadataRecord
     public var chapters: [Chapter]
 }
 
-public struct AudiobookBook: Sendable, Equatable {
-    public var asin: String
+public struct MetadataRecord: Sendable, Equatable {
+    public var id: String
     public var title: String
     public var subtitle: String?
     public var authors: [String]
@@ -161,13 +189,17 @@ public struct AudiobookBook: Sendable, Equatable {
     public var seriesIndex: Int?
     public var runtimeMinutes: Int?
     public var artworkURL: URL?
+    /// Identifiers the provider supplied. Audible answers with an ASIN,
+    /// OpenLibrary with an ISBN; neither has the other's.
+    public var asin: String?
+    public var isbn: String?
 
     /// The provider's answer expressed in OmniTag's own vocabulary, ready to be
     /// diffed against what the file currently says.
     public var tagSet: TagSet {
         var tags = TagSet()
         tags.title = title
-        if let subtitle, !subtitle.isEmpty { tags[.custom("SUBTITLE")] = .string(subtitle) }
+        if let subtitle, !subtitle.isEmpty { tags[.subtitle] = .string(subtitle) }
         if !authors.isEmpty { tags[.author] = .string(authors.joined(separator: ", ")) }
         if !authors.isEmpty { tags[.artist] = .string(authors.joined(separator: ", ")) }
         if !narrators.isEmpty { tags[.narrator] = .string(narrators.joined(separator: ", ")) }
@@ -177,7 +209,9 @@ public struct AudiobookBook: Sendable, Equatable {
         if let summary, !summary.isEmpty { tags[.synopsis] = .string(summary) }
         if let series { tags[.series] = .string(series) }
         if let seriesIndex { tags[.seriesIndex] = .number(seriesIndex) }
-        tags[.asin] = .string(asin)
+        if let asin { tags[.asin] = .string(asin) }
+        if let isbn { tags[.isbn] = .string(isbn) }
+        if let language { tags[.language] = .string(language) }
         tags.album = title  // players group audiobooks by album
         return tags
     }

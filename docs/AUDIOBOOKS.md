@@ -91,11 +91,53 @@ Whatever is chosen, the write goes through the same staged-and-verified
 discipline as every other writer, and the previous chapters are archived
 alongside the previous tags.
 
+## The library around it
+
+The audiobook tab is where the wizard is reached from, so it carries the fields
+the wizard writes: sortable Narrator, Series and ASIN columns (hidden by default
+in the other tabs, and hideable by right-clicking the header), a cover thumbnail,
+and an orange dot on any file whose edits are not yet on disk. ⌘L opens the
+wizard on the selection; ⌘R reveals it in the Finder.
+
+The inspector's cover well takes a dropped image and resamples anything over
+1400 px (`CoverImage`) — the same treatment Audible's own covers get on the way
+in, because a 3000 px poster written into each of a book's thirty parts is how a
+library balloons.
+
+## What the wizard actually does
+
+Four steps, and the chapters one disappears when there is nothing to reconcile
+(no provider chapters, or more than one file selected).
+
+- **Tags are written as a delta.** Only the ticked rows go to `EditEngine`,
+  merged into each file's own tags. Selecting twenty parts of one book and
+  taking the author no longer flattens their per-file titles and track numbers.
+  A row edited down to blank is skipped, not written empty — there is no
+  "clear" action in the wizard, and an empty tag is not one.
+- **The three spec'd actions are tick-presets**, not separate commit paths:
+  *Fill empty* ticks only the fields the file lacks, *Take all* ticks everything
+  Audible answered, *None* clears the ticks. The row is always the truth.
+- **The chapter strategy rewrites the rows**, so the table previews exactly what
+  will be written. It used to be applied after the fact, which silently threw
+  away any title the user had hand-typed.
+- **A pasted ASIN or Audible link is a lookup, not a search.** The field detects
+  a `B…` identifier in whatever is pasted, shows an ASIN badge, and queries the
+  product endpoint directly — the keyword index cannot reach every book it sells.
+- **Bulk chapter tools.** Retitle all with `Chapter %n%` / `%n%. %title%`, or
+  shift every start time, for the intro the provider did not account for. An
+  85-chapter book is not retyped by hand.
+- **Artwork failure is not tag failure.** A cover that will not download is
+  reported in the bar; the tags the user just reviewed are still applied. Empty
+  artwork never erases an existing cover.
+
 ## Status
 
 Done: `MetadataAPI` module — `AudibleClient`, `AudnexusClient`,
 `AudiobookMetadataService`, region fallback, search ladder, ranking, ASIN/URL
-parsing, offline fixtures, live opt-in tests. **MPEG-4 chapter writing** via `MPEG4ChapterWriter`.
+parsing, offline fixtures, live opt-in tests. **MPEG-4 chapter writing** via
+`MPEG4ChapterWriter`. **The wizard UI**: search (grid/list, region switch,
+empty vs error states), tag diff with per-row edit and revert, chapter diff with
+live strategy preview, summary, and artwork download to `covr`/`APIC`.
 
-Next: the tag diff model, artwork download and `covr` writing, the wizard UI,
-then mkv chapter editing.
+Next: mkv chapter editing, chapter editing without going through the wizard, and
+library persistence between launches.

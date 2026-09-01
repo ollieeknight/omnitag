@@ -12,6 +12,8 @@ enum ID3KeyMap {
         "TCON": .genre,
         "TCOM": .composer,
         "TIT1": .grouping,
+        "TIT3": .subtitle,
+        "TLAN": .language,
         "TPUB": .publisher,
         "TYER": .year,        // ID3v2.3
         "TDRC": .year,        // ID3v2.4 recording time
@@ -38,7 +40,8 @@ enum ID3KeyMap {
     static let writeFrames: [(String, TagKey)] = [
         ("TIT2", .title), ("TPE1", .artist), ("TPE2", .albumArtist),
         ("TALB", .album), ("TCON", .genre), ("TCOM", .composer),
-        ("TIT1", .grouping), ("TPUB", .publisher), ("TDRC", .year),
+        ("TIT1", .grouping), ("TIT3", .subtitle), ("TLAN", .language),
+        ("TPUB", .publisher), ("TDRC", .year),
         ("TRCK", .trackNumber), ("TPOS", .discNumber), ("TCMP", .compilation),
     ]
 

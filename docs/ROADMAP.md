@@ -28,21 +28,32 @@ change the file length); it fits nowhere (append at the end, blank the old one t
 file is never copied: 8 ms on the 1.3 GB episode, 32 ms on the 6.5 GB film,
 verified with `ffprobe` — durations unchanged, chapters intact, tags readable.
 
-## 1. Artwork editing
+## ✅ Done: artwork editing
 
-Read exists (`Artwork` on `MediaItem`). Needed: add, replace, remove, and a
-drag-and-drop well in the inspector. MPEG-4 uses the `covr` atom; mkv uses an
+`CoverImage` resamples anything over 1400 px to JPEG on the way in and passes
+smaller images through untouched. The inspector has a drop well with choose and
+remove; the wizard's downloaded covers go through the same path. Still open:
+roles beyond `.cover` (backdrops), and mkv `AttachedFile` artwork. MPEG-4 uses the `covr` atom; mkv uses an
 `AttachedFile` named `cover.jpg`; ID3 uses `APIC`. Resize on import — a 4000 px
 poster in every file is how libraries balloon.
 
 ---
 
-## 1b. The audiobook wizard (in progress — see `AUDIOBOOKS.md`)
+## ✅ Done: the audiobook wizard — see `AUDIOBOOKS.md`
 
-`MetadataAPI` is done and verified live. Remaining, in order: tag diff model
-with merge/overwrite-selected/overwrite-all, artwork download and `covr`
-writing, the drag-and-drop + search + diff wizard UI, then chapter editing
-(recommendation: `AVAssetWriter` remux first, `chpl` fast path later).
+`MetadataAPI`, the tag diff (delta writes, tick-presets, per-row edit and
+revert), artwork download to `covr`/`APIC`, the chapter diff with live strategy
+preview, drag-and-drop import, and MPEG-4 chapter writing via
+`MPEG4ChapterWriter`.
+
+Left over: mkv chapters — see below.
+
+## ✅ Done: book formats (EPUB + PDF)
+
+`ZipArchive`, `OPFDocument`, `EPUBKeyMap`, `EPUBReader`, `EPUBTagWriter`,
+`PDFReader`, `PDFTagWriter`, a Books tab, and `MetadataProvider` with
+OpenLibrary behind it. See `BOOKS.md`. Left open: MOBI/AZW3, CBZ, adding a
+cover to an EPUB that has none, and editing an EPUB's table of contents.
 
 ## 2. Metadata providers
 
@@ -51,8 +62,8 @@ writing, the drag-and-drop + search + diff wizard UI, then chapter editing
 1. **TMDB** (movies + TV) — the highest-value one, and the only provider that
    needs a key. The key goes in the Keychain via a preferences pane, never in
    the binary or the repo.
-2. **Audnexus** (audiobooks, ASIN-keyed, no key needed). The developer's m4b
-   already carries its ASIN in a `CDEK` atom — use it as the lookup key.
+2. ✅ **Audnexus** (audiobooks) and **OpenLibrary** (books) — both done and
+   behind `MetadataProvider`.
 3. **iTunes Search** (music, no key), MusicBrainz as fallback (1 req/s, real
    User-Agent required).
 4. TVmaze if TMDB's episode data proves thin. Watchmode: out of scope, decided.

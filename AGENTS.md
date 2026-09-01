@@ -15,9 +15,10 @@ Read these before writing anything. They are short and they are current.
 | `docs/DECISIONS.md` | settled questions — do not re-litigate these |
 | `docs/DEVELOPMENT.md` | build, test, Xcode, real-media testing |
 | `docs/DISTRIBUTION.md` | Homebrew and signing |
-| `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the audiobook wizard |
+| `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the metadata wizard |
+| `docs/BOOKS.md` | EPUB and PDF, the zip writer, and the OpenLibrary provider |
 
-"Read the docs and do X" means: those seven, then X. If X is not in the roadmap,
+"Read the docs and do X" means: those nine, then X. If X is not in the roadmap,
 say where it fits before starting.
 
 When you finish a piece of work, update `STATUS.md` and tick the roadmap entry
@@ -26,8 +27,8 @@ believes it.
 
 ## What this is
 
-Native macOS tag editor for a local media library: music, audiobooks, movies,
-TV. Mp3tag's job, wider scope. Offline-first. No cloud sync, no streaming, no
+Native macOS tag editor for a local media library: music, audiobooks, books,
+movies, TV. Mp3tag's job, wider scope. Offline-first. No cloud sync, no streaming, no
 playback engine, no library server.
 
 Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
@@ -44,7 +45,7 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 2. **Tags round-trip losslessly.** Unknown atoms and frames become
    `TagKey.custom` and are written back. Dropping one is a bug, not a limitation.
 3. **Reader and writer share one key table per format** (`MPEG4KeyMap`,
-   `ID3KeyMap`, `MatroskaKeyMap`). Never add a key to one side only — that is how
+   `ID3KeyMap`, `MatroskaKeyMap`, `EPUBKeyMap`, `PDFKeyMap`). Never add a key to one side only — that is how
    "my edit vanished on save" happens. Go through `MediaTagReader` /
    `MediaTagWriter`, never a concrete backend: they are what route mkv away from
    AVFoundation and mp3 to the ID3 writer.
@@ -61,9 +62,12 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 Sources/MediaCore     domain model. Foundation only — no AVFoundation, no SwiftUI
 Sources/TagIO         MediaTagReader / MediaTagWriter (facades), AVTagReader,
                       MatroskaReader + MatroskaTagWriter, EBMLReader/EBMLWriter,
-                      MPEG4TagWriter, ID3TagWriter, ID3v2, key maps, TagBackupStore
+                      MPEG4TagWriter, ID3TagWriter, ID3v2, ZipArchive,
+                      EPUBReader/EPUBTagWriter/OPFDocument, PDF read+write,
+                      CoverImage, key maps, TagBackupStore
 Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter
-Sources/MetadataAPI   AudibleClient, AudnexusClient, AudiobookMetadataService
+Sources/MetadataAPI   MetadataProvider protocol, AudibleClient, AudnexusClient,
+                      AudibleProvider, OpenLibraryProvider
 Sources/LibraryIndex  LibraryScanner
 Sources/OmniTagApp    SwiftUI shell (views live here so Previews work)
 Tests/                Swift Testing
@@ -101,8 +105,9 @@ missing. See `docs/DEVELOPMENT.md`.
   `EBMLBuilder` for Matroska, both tagged through the production writer.
   Copyrighted media must never enter this repo.
 - The fixture library is Twin Peaks (`Tests/TagIOTests/TwinPeaks.swift`):
-  Badalamenti's theme (music), *The Secret Diary of Laura Palmer* (audiobook,
-  chapters), *Fire Walk with Me* (movie), S01E01 *Northwest Passage* (TV).
+  Badalamenti's theme (music), *The Secret Diary of Laura Palmer* (audiobook
+  with chapters, and the EPUB), *Fire Walk with Me* (movie), S01E01
+  *Northwest Passage* (TV).
   New format support means a new fixture there.
 - No mocks for the filesystem. Write real files to a temp directory.
 - A genuine unimplemented gap may be `withKnownIssue`, never a deleted assertion.

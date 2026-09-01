@@ -206,3 +206,140 @@ struct ChapterDiffTests {
         #expect(shifted[2].start == 220, "420 - 200 = 220")
     }
 }
+
+@Suite("TagDiff delta and quick actions")
+struct TagDiffDeltaTests {
+    private func diff() -> TagDiff {
+        var current = TagSet(); current.title = "Old Title"
+        var proposed = TagSet()
+        proposed.title = "New Title"
+        proposed[.author] = .string("Jennifer Lynch")
+        proposed[.narrator] = .string("")
+        return TagDiff(current: current, proposed: proposed)
+    }
+
+    @Test("the delta carries only the ticked keys")
+    func deltaIsTickedKeysOnly() {
+        let delta = diff().delta(for: [.author])
+        #expect(delta[.author]?.stringValue == "Jennifer Lynch")
+        #expect(delta[.title] == nil)
+    }
+
+    @Test("a row edited to blank is skipped rather than written empty")
+    func blankRowsAreSkipped() {
+        let delta = diff().delta(for: [.narrator, .author])
+        #expect(delta[.narrator] == nil)
+        #expect(delta.values.count == 1)
+    }
+
+    @Test("fill-empty ticks only the fields the file lacks")
+    func mergeAction() {
+        let keys = diff().keys(for: .merge)
+        #expect(keys.contains(.author))
+        #expect(!keys.contains(.title))
+    }
+
+    @Test("take-all ticks every field the provider supplied")
+    func overwriteAllAction() {
+        #expect(diff().keys(for: .overwriteAll) == Set([.title, .author, .narrator]))
+        #expect(diff().keys(for: .none).isEmpty)
+    }
+}
+
+@Suite("ChapterDiff strategies rewrite the rows")
+struct ChapterDiffStrategyTests {
+    private let mine = [
+        Chapter(index: 0, start: 0, title: "My One"),
+        Chapter(index: 1, start: 100, title: "My Two"),
+    ]
+    private let theirs = [
+        Chapter(index: 0, start: 5, duration: 95, title: "Their One"),
+        Chapter(index: 1, start: 100, duration: 60, title: "Their Two"),
+        Chapter(index: 2, start: 160, duration: 40, title: "Their Three"),
+    ]
+
+    @Test("keep-my-titles shows their times against my titles in the editable column")
+    func strategyIsVisibleInTheRows() {
+        let rows = ChapterDiff(current: mine, proposed: theirs)
+            .applying(.keepTitlesTakeTimes).rows
+        #expect(rows[0].proposed?.title == "My One")
+        #expect(rows[0].proposed?.start == 5)
+        #expect(rows[2].proposed?.title == "Their Three")
+    }
+
+    @Test("a hand-edited title survives, because resolved reads the rows")
+    func handEditsWin() {
+        var diff = ChapterDiff(current: mine, proposed: theirs).applying(.takeTheirs)
+        diff.rows[0].proposed?.title = "Prologue"
+        #expect(diff.resolved[0].title == "Prologue")
+        #expect(diff.resolved.count == 3)
+    }
+
+    @Test("keep-mine trims the rows the strategy drops")
+    func keepMineTrims() {
+        let diff = ChapterDiff(current: mine, proposed: theirs).applying(.keepMine)
+        #expect(diff.resolved.map(\.title) == ["My One", "My Two", "Their Three"])
+    }
+}
+
+@Suite("Search text routing")
+struct SearchTextTests {
+    @Test("a pasted Audible URL searches by ASIN, not by keywords")
+    func pastedURLBecomesASIN() {
+        var query = MetadataQuery()
+        query.searchText = "https://www.audible.co.uk/pd/The-Secret-Diary/B01M11U23O?ref=a_search"
+        #expect(query.asin == "B01M11U23O")
+        #expect(query.keywords == nil)
+    }
+
+    @Test("a bare ASIN searches by ASIN")
+    func bareASIN() {
+        var query = MetadataQuery()
+        query.searchText = "  B01M11U23O "
+        #expect(query.asin == "B01M11U23O")
+    }
+
+    @Test("ordinary words stay keywords, and clear a previous ASIN")
+    func wordsStayKeywords() {
+        var query = MetadataQuery(asin: "B01M11U23O")
+        query.searchText = "the secret diary of laura palmer"
+        #expect(query.asin == nil)
+        #expect(query.keywords == "the secret diary of laura palmer")
+        #expect(query.searchText == "the secret diary of laura palmer")
+    }
+
+    @Test("an ASIN query reads back as the ASIN")
+    func asinReadsBack() {
+        #expect(MetadataQuery(asin: "B01M11U23O").searchText == "B01M11U23O")
+    }
+}
+
+@Suite("Chapter bulk tools")
+struct ChapterBulkToolTests {
+    private var diff: ChapterDiff {
+        ChapterDiff(current: [], proposed: [
+            Chapter(index: 0, start: 0, title: "Opening Credits"),
+            Chapter(index: 1, start: 30, title: "Chapter One"),
+        ])
+    }
+
+    @Test("rename pattern rewrites the editable column, not the file's chapters")
+    func renamePattern() {
+        let renamed = diff.renamingAll(with: "Part %n% — %title%")
+        #expect(renamed.resolved.map(\.title) == ["Part 1 — Opening Credits", "Part 2 — Chapter One"])
+        #expect(renamed.rows[0].current == nil)
+    }
+
+    @Test("shifting times moves starts and clamps at zero")
+    func shiftTimes() {
+        let shifted = diff.shiftingAll(by: -10)
+        #expect(shifted.resolved.map(\.start) == [0, 20])
+    }
+
+    @Test("shifting keeps hand-typed titles")
+    func shiftKeepsTitles() {
+        var edited = diff
+        edited.rows[0].proposed?.title = "Prologue"
+        #expect(edited.shiftingAll(by: 5).resolved[0].title == "Prologue")
+    }
+}

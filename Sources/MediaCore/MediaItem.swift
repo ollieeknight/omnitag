@@ -44,3 +44,19 @@ public struct MediaItem: Sendable, Hashable, Codable, Identifiable {
         self.chapters = chapters; self.artwork = artwork
     }
 }
+
+extension Artwork {
+    /// The image type read from the bytes themselves. Containers lie about this
+    /// — AVFoundation reports no MIME at all, and a PNG cover written back as
+    /// `image/jpeg` is a tag no player can decode.
+    public static func sniffMimeType(_ data: Data) -> String {
+        // Copied to an Array first: `data` is often a slice of a parsed frame,
+        // and a slice's indices start where it was cut, not at zero.
+        let head = Array(data.prefix(12))
+        if head.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
+        if head.starts(with: [0x47, 0x49, 0x46]) { return "image/gif" }
+        if head.count == 12, head.starts(with: [0x52, 0x49, 0x46, 0x46]),
+           head[8...11] == [0x57, 0x45, 0x42, 0x50] { return "image/webp" }
+        return "image/jpeg"
+    }
+}

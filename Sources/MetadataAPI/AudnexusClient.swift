@@ -23,7 +23,7 @@ public struct AudnexusClient: Sendable {
         return url
     }
 
-    public func book(asin: String) async throws -> AudiobookBook {
+    public func book(asin: String) async throws -> MetadataRecord {
         let (data, status) = try await transport.data(from: try url("/books/\(asin)"))
         guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
         if let failure = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
@@ -92,9 +92,9 @@ public struct AudnexusClient: Sendable {
         var runtimeLengthMin: Int?
         var image: String?
 
-        var book: AudiobookBook {
-            AudiobookBook(
-                asin: asin, title: title, subtitle: subtitle,
+        var book: MetadataRecord {
+            MetadataRecord(
+                id: asin, title: title, subtitle: subtitle,
                 authors: authors?.map(\.name) ?? [],
                 narrators: narrators?.map(\.name) ?? [],
                 publisher: publisherName,
@@ -107,7 +107,8 @@ public struct AudnexusClient: Sendable {
                 series: seriesPrimary?.name,
                 seriesIndex: seriesPrimary?.position.flatMap { Int($0) },
                 runtimeMinutes: runtimeLengthMin,
-                artworkURL: image.flatMap { URL(string: $0) })
+                artworkURL: image.flatMap { URL(string: $0) },
+                asin: asin, isbn: nil)
         }
 
         static func strippingHTML(_ html: String) -> String {
@@ -125,9 +126,9 @@ public struct AudnexusClient: Sendable {
 /// audiobook does not exist in the UK catalogue at all. So the chosen region is
 /// tried first and the US is tried second, and the result says which storefront
 /// actually answered.
-public struct AudiobookMetadataService: Sendable {
+public struct AudibleProvider: Sendable {
     public struct SearchOutcome: Sendable {
-        public var candidates: [AudiobookCandidate]
+        public var candidates: [MetadataCandidate]
         /// The storefront that produced these results — not always the one asked for.
         public var region: AudibleRegion
     }
@@ -144,11 +145,11 @@ public struct AudiobookMetadataService: Sendable {
         region == .unitedStates ? [region] : [region, .unitedStates]
     }
 
-    public func search(_ query: AudiobookQuery, limit: Int = 20) async throws -> [AudiobookCandidate] {
+    public func search(_ query: MetadataQuery, limit: Int = 20) async throws -> [MetadataCandidate] {
         try await searchWithRegion(query, limit: limit).candidates
     }
 
-    public func searchWithRegion(_ query: AudiobookQuery, limit: Int = 20) async throws -> SearchOutcome {
+    public func searchWithRegion(_ query: MetadataQuery, limit: Int = 20) async throws -> SearchOutcome {
         var lastError: (any Error)?
 
         // Region first, then each rung of the query ladder: a narrower search
@@ -204,11 +205,11 @@ public struct AudiobookMetadataService: Sendable {
 
     /// Chapters are best-effort: plenty of books have none, and a missing list
     /// must not cost the user the tags they came for.
-    public func details(for asin: String, in preferredRegion: AudibleRegion? = nil) async throws -> AudiobookDetails {
+    public func details(for asin: String, in preferredRegion: AudibleRegion? = nil) async throws -> MetadataDetails {
         if asin.starts(with: "/works/") {
             let client = OpenLibraryClient(transport: transport)
             let book = try await client.book(key: asin)
-            return AudiobookDetails(book: book, chapters: [])
+            return MetadataDetails(book: book, chapters: [])
         }
         
         let regions = preferredRegion.map { $0 == .unitedStates ? [$0] : [$0, .unitedStates] }
@@ -220,7 +221,7 @@ public struct AudiobookMetadataService: Sendable {
             do {
                 let book = try await client.book(asin: asin)
                 let chapters = (try? await client.chapters(asin: asin)) ?? []
-                return AudiobookDetails(book: book, chapters: chapters)
+                return MetadataDetails(book: book, chapters: chapters)
             } catch {
                 lastError = error
             }

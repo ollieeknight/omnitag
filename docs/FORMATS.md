@@ -164,3 +164,47 @@ the appended bytes outside the declared Segment, where they are ignored.
 
 If step 4 needs changes anywhere else, the abstraction is wrong — say so rather
 than working around it.
+
+
+## EPUB (`.epub`)
+
+A zip. `META-INF/container.xml` names the package document; the metadata is
+Dublin Core inside the OPF's `<metadata>` element. Read with `EPUBReader`,
+written with `EPUBTagWriter`, table in `EPUBKeyMap`.
+
+| TagKey | Element |
+|---|---|
+| `.title` | `dc:title` (first) |
+| `.subtitle` | `dc:title` (second, if present) |
+| `.author` | `dc:creator` |
+| `.publisher` | `dc:publisher` |
+| `.synopsis` | `dc:description` |
+| `.language` | `dc:language` |
+| `.genre` | every `dc:subject`, joined with `/` |
+| `.year` | first four digits of `dc:date` |
+| `.isbn` | `dc:identifier` — `opf:scheme="ISBN"`, a `urn:isbn:` URI, or a bare 10/13-digit value |
+| `.series` | `belongs-to-collection` refinement, else `calibre:series` |
+| `.seriesIndex` | `group-position`, else `calibre:series_index` |
+| artwork | manifest item with `properties="cover-image"`, else `<meta name="cover">` naming a manifest id |
+| chapters | nav document, else the NCX — **read-only** |
+
+Namespaces matter, prefixes do not: `dc:` is a local nickname and real files use
+a default Dublin Core namespace instead. Match on the namespace URI.
+
+## PDF (`.pdf`)
+
+PDFKit document attributes. Read with `PDFReader`, written with `PDFTagWriter`,
+table in `PDFKeyMap`.
+
+| TagKey | Attribute |
+|---|---|
+| `.title` | `titleAttribute` |
+| `.author` | `authorAttribute` |
+| `.synopsis` | `subjectAttribute` |
+| `.genre` | `keywordsAttribute` (array, joined with `/`) |
+| `.publisher` | `creatorAttribute` |
+| `.year` | year of `creationDateAttribute` (read-only) |
+| chapters | the outline — **read-only** |
+| artwork | page one, rendered — **preview only, never written** |
+
+Encrypted, locked and digitally-signed PDFs are refused on write.

@@ -89,8 +89,11 @@ struct RealMediaTests {
 
         for item in items {
             let read = try await MediaTagReader().read(item.url)
-            #expect(read.duration ?? 0 > 0, "\(item.url.lastPathComponent) has no duration")
             #expect(read.tags.title != nil, "\(item.url.lastPathComponent) has no title")
+            // A book has no timeline, so only time-based media owes a duration.
+            if item.container.isTimeBased {
+                #expect(read.duration ?? 0 > 0, "\(item.url.lastPathComponent) has no duration")
+            }
         }
     }
 }

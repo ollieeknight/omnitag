@@ -1,5 +1,6 @@
 import EditEngine
 import LibraryIndex
+import MetadataAPI
 import MediaCore
 import SwiftUI
 import TagIO
@@ -18,10 +19,26 @@ struct OmniTagApp: App {
             CommandGroup(after: .newItem) {
                 Button("Add Folder…") { model.pickFolder() }
                     .keyboardShortcut("o")
+                Button("Add Files…") { model.pickFiles() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                 Divider()
                 Button("Save Changes") { Task { await model.save() } }
                     .keyboardShortcut("s")
-                    .disabled(model.dirtyCount == 0)
+                    .disabled(model.dirtyCount == 0 || model.saveProgress != nil)
+            }
+            CommandMenu("Library") {
+                Button("Search Metadata…") { model.showWizard = true }
+                    .keyboardShortcut("l")
+                    .disabled(model.selection.isEmpty || !model.kindHasProvider)
+                Button("Set Cover…") { model.pickArtwork() }
+                    .disabled(model.selection.isEmpty)
+                Divider()
+                Button("Reveal in Finder") { model.revealSelected() }
+                    .keyboardShortcut("r")
+                    .disabled(model.selection.isEmpty)
+                Button("Remove from Library") { Task { await model.confirmedRemoveSelected() } }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(model.selection.isEmpty)
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo") { Task { await model.undo() } }
@@ -46,15 +63,32 @@ final class LibraryModel {
     var canRedo = false
     var dirtyCount = 0
     var showWizard = false
+    var isDropTarget = false
+    /// Which files differ from disk, so the table can mark them one by one
+    /// rather than only counting them in the status bar.
+    var dirtyURLs: Set<URL> = []
+    /// Files written / files to write, while a save is running. Chapter writes
+    /// remux the whole file, so this is a real wait worth showing.
+    var saveProgress: (done: Int, total: Int)?
+    var failures: [SaveFailure] = []
+    var sortOrder = [KeyPathComparator(\MediaItem.displayTitle)]
 
     private let engine = EditEngine(writer: FileTagWriter())
 
+    // ponytail: filters and sorts on every read, and the table reads it several
+    // times per redraw. Cache it against kind/search/sortOrder if a library
+    // large enough to stutter while typing ever turns up.
     var visible: [MediaItem] {
         items.filter { $0.kind == kind }
             .filter { search.isEmpty || $0.searchText.localizedCaseInsensitiveContains(search) }
+            .sorted(using: sortOrder)
     }
 
     var selectedItems: [MediaItem] { visible.filter { selection.contains($0.url) } }
+
+    /// Whether any provider serves the current tab. Movies and TV have none
+    /// yet, and the wizard says so rather than opening onto nothing.
+    var kindHasProvider: Bool { !MetadataProviders.serving(kind).isEmpty }
 
     /// Fields shared by the whole selection; anything conflicting reads empty
     /// and shows a "multiple values" placeholder.
@@ -90,41 +124,34 @@ final class LibraryModel {
             let scanner = LibraryScanner()
             var scanned: [MediaItem] = []
             for url in urls {
-                // If it's a directory, scan it. If it's a file, just wrap it if valid.
                 var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
-                    var items = try await scanner.scan(url)
-                    // Force the imported items into the currently selected media kind
-                    for i in items.indices {
-                        items[i].kind = self.kind
-                    }
-                    scanned.append(contentsOf: items)
+                let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                if exists, isDirectory.boolValue {
+                    scanned.append(contentsOf: try await scanner.scan(url))
                 } else if let container = ContainerFormat(pathExtension: url.pathExtension) {
-                    scanned.append(MediaItem(url: url, kind: self.kind, container: container, duration: nil, tags: TagSet()))
+                    scanned.append(MediaItem(url: url, kind: self.kind, container: container))
                 }
             }
-            
-            // Append rather than replace so users can drop multiple times
-            var newItems = self.items
-            newItems.append(contentsOf: scanned)
-            // deduplicate by URL
-            var seen = Set<URL>()
-            newItems = newItems.filter { seen.insert($0.url).inserted }
-            
-            self.items = newItems
-            status = "\(newItems.count) files — reading tags…"
-            
-            let reader = MediaTagReader()
-            for (index, item) in newItems.enumerated() {
-                // Only read if it hasn't been read yet (empty tags/duration). 
-                // ponytail: this is a simple heuristic, but good enough for now.
-                if item.duration == nil, let read = try? await reader.read(item.url) { 
-                    self.items[index] = read 
-                }
-            }
-            await engine.load(self.items)
+            // Files land in the tab the user was looking at; the container's
+            // default kind cannot tell an audiobook m4a from a music one.
+            for index in scanned.indices { scanned[index].kind = self.kind }
+
+            // add, never load: load resets the saved baseline and would mark
+            // every pending edit as already written.
+            await engine.add(scanned)
             await refresh()
-            status = "\(self.items.count) files"
+            status = "\(items.count) files — reading tags…"
+
+            // ponytail: serial, one file at a time. Fine for hundreds, visible
+            // at thousands — switch to a TaskGroup when a real library drags.
+            let reader = MediaTagReader()
+            for item in scanned {
+                guard var read = try? await reader.read(item.url) else { continue }
+                read.kind = item.kind
+                await engine.refreshFromDisk(read)
+            }
+            await refresh()
+            status = "\(items.count) files"
         } catch {
             status = "Scan failed: \(error.localizedDescription)"
         }
@@ -140,8 +167,79 @@ final class LibraryModel {
     func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?) async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
-        await engine.applySnapshot(tags: tags, artwork: artwork, chapters: chapters, to: urls)
+        // Audible serves covers well past poster size; resample before one lands
+        // in each of a book's parts.
+        let sized = artwork.compactMap { CoverImage.artwork(from: $0.data, role: $0.role) }
+        await engine.applySnapshot(tags: tags, artwork: sized, chapters: chapters, to: urls)
         await refresh()
+    }
+
+    /// Artwork edits go through the engine like any other change: undoable,
+    /// and written only when the user saves.
+    func setArtwork(_ artwork: [Artwork]) async {
+        let urls = Array(selection)
+        guard !urls.isEmpty else { return }
+        await engine.setArtwork(artwork, to: urls)
+        await refresh()
+    }
+
+    /// Reads a dropped or chosen image file. Anything ImageIO cannot decode is
+    /// refused here rather than written into the library as a bad atom, and
+    /// anything poster-sized is resampled before it lands in every file.
+    func setArtwork(fromFile url: URL) async {
+        guard let data = try? Data(contentsOf: url),
+              let artwork = CoverImage.artwork(from: data) else {
+            status = "\(url.lastPathComponent) is not an image OmniTag can read"
+            return
+        }
+        await setArtwork([artwork])
+        if artwork.data.count < data.count {
+            status = "Cover resampled to \(CoverImage.maxPixels) px (\(data.count.formatted(.byteCount(style: .file))) → \(artwork.data.count.formatted(.byteCount(style: .file))))"
+        }
+    }
+
+    func pickArtwork() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Set Cover"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await setArtwork(fromFile: url) }
+    }
+
+    /// Edits among the selection that are not yet on disk. Removal cannot be
+    /// undone, so the view asks before throwing these away.
+    func unsavedInSelection() async -> Int {
+        await engine.unsavedCount(among: Array(selection))
+    }
+
+    /// The menu-bar route to removal. It runs the same guard the context menu
+    /// does, via an alert rather than a sheet-owned dialog.
+    func confirmedRemoveSelected() async {
+        let unsaved = await unsavedInSelection()
+        guard unsaved > 0 else { return await removeSelected() }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "\(unsaved) file\(unsaved == 1 ? " has" : "s have") unsaved changes"
+        alert.informativeText = "Removing them discards those edits. The files on disk are not touched, and this cannot be undone."
+        alert.addButton(withTitle: "Remove Anyway")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        await removeSelected()
+    }
+
+    /// Drops files from the library. The files themselves are never touched —
+    /// this is a view of a folder, not a manager of it.
+    func removeSelected() async {
+        let urls = Array(selection)
+        guard !urls.isEmpty else { return }
+        await engine.remove(urls)
+        selection = []
+        await refresh()
+        status = "\(items.count) files"
+    }
+
+    func revealSelected() {
+        NSWorkspace.shared.activateFileViewerSelecting(Array(selection))
     }
 
     func undo() async { await engine.undo(); await refresh() }
@@ -149,13 +247,20 @@ final class LibraryModel {
 
     func save() async {
         let count = dirtyCount
+        guard count > 0 else { return }
+        failures = []
+        saveProgress = (0, count)
         status = "Saving \(count) file\(count == 1 ? "" : "s")…"
+        defer { saveProgress = nil }
         do {
-            let failures = try await engine.save()
+            let written = try await engine.save { [weak self] _, done, total in
+                Task { @MainActor in self?.saveProgress = (done, total) }
+            }
+            failures = written
             await refresh()
-            status = failures.isEmpty
+            status = written.isEmpty
                 ? "Saved \(count) file\(count == 1 ? "" : "s")"
-                : "\(failures.count) of \(count) failed: \(failures[0].error.localizedDescription)"
+                : "\(written.count) of \(count) failed — see the warning for details"
         } catch {
             status = "Save failed: \(error.localizedDescription)"
         }
@@ -165,13 +270,29 @@ final class LibraryModel {
         items = await engine.allItems
         canUndo = await engine.canUndo
         canRedo = await engine.canRedo
-        dirtyCount = await engine.dirtyURLs.count
+        let dirty = await engine.dirtyURLs
+        dirtyURLs = Set(dirty)
+        dirtyCount = dirty.count
     }
 }
 
-private extension MediaItem {
+/// Non-optional, sortable views of a tag set. `KeyPathComparator` needs a
+/// `Comparable` value, and `String?` is not one — every column that sorts has
+/// to name a property like these.
+extension MediaItem {
     var searchText: String {
-        [tags.title, tags.artist, tags.album, tags.author, tags.showName, url.lastPathComponent]
+        [tags.title, tags.artist, tags.album, tags.author, tags.showName,
+         tags[.narrator]?.stringValue, tags[.asin]?.stringValue, url.lastPathComponent]
             .compactMap(\.self).joined(separator: " ")
     }
+    var displayTitle: String { tags.title ?? url.deletingPathExtension().lastPathComponent }
+    var displayArtist: String { tags.artist ?? tags.author ?? "" }
+    var displayAuthor: String { tags.author ?? tags.artist ?? "" }
+    var displayNarrator: String { tags[.narrator]?.stringValue ?? "" }
+    var displaySeries: String { tags.showName ?? tags[.series]?.stringValue ?? tags.album ?? "" }
+    var displaySeriesIndex: Int { tags[.seriesIndex]?.intValue ?? 0 }
+    var displayASIN: String { tags[.asin]?.stringValue ?? "" }
+    var displayISBN: String { tags[.isbn]?.stringValue ?? "" }
+    var chapterCount: Int { chapters.count }
+    var sortableDuration: TimeInterval { duration ?? 0 }
 }

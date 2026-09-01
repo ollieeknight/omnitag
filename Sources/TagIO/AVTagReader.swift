@@ -34,7 +34,7 @@ public struct AVTagReader: Sendable {
         for item in metadata {
             if isArtwork(item) {
                 if let data = try? await item.load(.dataValue) {
-                    artwork.append(Artwork(data: data, mimeType: "image/jpeg"))
+                    artwork.append(Artwork(data: data, mimeType: Artwork.sniffMimeType(data)))
                 }
             } else if let (indexKey, totalKey) = MPEG4KeyMap.pairKeys(for: item) {
                 if let data = try? await item.load(.dataValue) {

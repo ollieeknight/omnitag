@@ -44,6 +44,8 @@ enum MPEG4KeyMap {
         .seriesIndex: "SERIES-PART",
         .isbn: "ISBN",
         .asin: "ASIN",
+        .subtitle: "SUBTITLE",
+        .language: "LANGUAGE",
         .studio: "STUDIO",
         // Real freeform atom name Apple itself uses for the rating string.
         .contentRating: "iTunEXTC",

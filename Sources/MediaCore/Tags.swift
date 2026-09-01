@@ -2,6 +2,7 @@ public enum TagKey: Sendable, Hashable, Codable {
     case title, artist, albumArtist, album, genre, year, trackNumber, trackTotal
     case discNumber, discTotal, comment, composer, grouping, compilation
     case author, narrator, series, seriesIndex, publisher, isbn, asin      // audiobook
+    case language, subtitle                                                // books
     case showName, seasonNumber, episodeNumber, episodeTitle, director,
          studio, contentRating, synopsis                                    // video
     /// Anything a format carries that we do not model. Kept so a round-trip

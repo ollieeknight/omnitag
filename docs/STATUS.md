@@ -9,29 +9,41 @@ describes — a stale STATUS is worse than none, because the next session trusts
 |---|---|
 | Domain model | `MediaCore`: `MediaItem`, `TagSet`, `TagKey`, `Chapter`, `Artwork`. Foundation only. |
 | Scanning | `LibraryScanner`: recursive walk, extension-typed, hidden files and packages skipped. |
-| Reading | `MediaTagReader` routes by container: AVFoundation for MPEG-4/mp3/wav/aiff, `MatroskaReader` for mkv. |
-| Writing | `MediaTagWriter` routes: `MPEG4TagWriter` (MP4 family), `ID3TagWriter` (mp3), `MatroskaTagWriter` (mkv). |
+| Reading | `MediaTagReader` routes by container: AVFoundation for MPEG-4/mp3/wav/aiff, `MatroskaReader` for mkv, `EPUBReader` for epub, `PDFReader` for pdf. |
+| Writing | `MediaTagWriter` routes: `MPEG4TagWriter` (MP4 family), `ID3TagWriter` (mp3), `MatroskaTagWriter` (mkv), `EPUBTagWriter` (epub), `PDFTagWriter` (pdf). |
 | ID3 | Read **and** write. Writes v2.4/UTF-8, preserves unmanaged frames, `3/12` split. |
 | MPEG-4 | Read **and** write. Standard atoms (`©nam`, `tvsh`, `trkn`…) plus freeform `----` for SERIES/ASIN/STUDIO. |
 | Matroska | Read **and** write. Tags written by in-place patch — the file is never copied. |
 | Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Not editable yet. |
 | Writing safety | Stage to sibling temp → re-read to verify → atomic `replaceItemAt`. Previous tags archived as JSON. |
-| Editing | `EditEngine`: batch `set`/`clear`/`replace` over a selection, undo/redo per batch, save only dirty files. |
-| UI | Three panes: kind sidebar, sortable table, batch inspector with per-kind field sets and chapter list. |
-| Audiobook metadata | `MetadataAPI`: Audible search + Audnexus detail/chapters, region fallback, ASIN/URL input. See `AUDIOBOOKS.md`. |
-| Tests | 108, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
+| Editing | `EditEngine`: batch `set`/`clear`/`replace` over a selection, undo/redo per batch, save only dirty files. `applySnapshot` writes the wizard's result as a **delta**, so per-file tags survive a batch. |
+| UI | Three panes: kind sidebar; sortable, column-customisable table with covers and per-row unsaved marks; batch inspector with per-kind fields, an artwork well and the chapter list. |
+| Books | EPUB read **and** write via a hand-rolled `ZipArchive`; OPF edited surgically, other entries copied compressed. PDF read and write via PDFKit. See `BOOKS.md`. |
+| Metadata providers | `MetadataProvider` protocol. Audible + Audnexus for audiobooks, OpenLibrary for books. The wizard is provider-driven and serves both tabs. |
+| Tests | 208, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
 
 ## Does not work yet
 
 - **flac, ogg/opus.** Scanned and listed, not parsed at all.
+- **MOBI/AZW3 and CBZ.** Out of scope for now; considered and deferred.
+- **An EPUB table of contents is read-only**, and an EPUB cover can be replaced
+  but not added.
+- **PDF artwork.** Page one is rendered as a preview; a PDF cannot store a cover.
+  Encrypted and digitally-signed PDFs are refused on write.
 - **mkv chapters and attachments are read-only.** Only the `Tags` element is
   written; editing chapters means the same patch machinery applied to `Chapters`.
-- **Chapter editing.** Writable for MPEG-4 files (via remuxing). Read-only for mkv.
-- **Artwork editing.** Read only; no add/replace/remove.
-- **Metadata providers.** Audiobooks done (Audible + Audnexus). TMDB, TVmaze,
-  iTunes and MusicBrainz not started.
-- **The audiobook wizard UI.** The search sheet, tag diff, and chapter diff are built and wired up. Drag-and-drop is not built yet.
+- **Chapter editing.** Writable for MPEG-4 files (via remuxing). Read-only for
+  mkv. The wizard only writes chapters when exactly one file is selected — one
+  book's chapter list does not belong in each of its twenty part files.
+- **Metadata providers.** Audiobooks (Audible + Audnexus) and books
+  (OpenLibrary) done. TMDB, TVmaze, iTunes and MusicBrainz not started — the
+  wizard button is disabled on tabs no provider serves.
+- **Artwork beyond one cover.** One `.cover` image per file: drop, choose,
+  remove, resampled to 1400 px on import. Backdrops and multiple roles are
+  modelled but not editable.
 - **Filename ↔ tag conversion.** Not started.
+- **Chapter editing outside the wizard.** The inspector lists chapters read-only
+  and sends you to the wizard to change them.
 - **Library persistence.** Nothing is remembered between launches; you re-add the folder each time.
 
 `MediaTagReader.canRead` / `canWrite` is the machine-readable version of this
@@ -40,8 +52,20 @@ step.
 
 ## Known rough edges
 
+- `ZipArchive` reads a whole archive into memory (`ponytail:` marked). Fine at
+  book sizes; a 300 MB illustrated EPUB would want a `FileHandle`.
+
+- `visible` filters and sorts on every read and the table reads it several times
+  per redraw (`ponytail:` marked in `App.swift`). Fine for hundreds.
+- Removing files from the library purges their undo history — it is the one
+  action in the app that cannot be undone, so it asks first when edits are
+  pending.
+
 - Tag reading is serial, one file at a time (`ponytail:` marked in `App.swift`).
   Fine for hundreds of files, visible at thousands.
+- Imported files take the kind of the tab they were dropped into, because a
+  container cannot distinguish an audiobook `.m4a` from a music one. Moving a
+  file between tabs afterwards is not possible yet.
 - `MediaItem.id` is the URL, so a file moved outside the app loses its identity
   (`ponytail:` marked in `MediaItem.swift`).
 - Audible m4b files carry a multi-kilobyte base64 `JSON` atom. It round-trips
@@ -66,7 +90,7 @@ step.
 ## Verify the claims above
 
 ```sh
-make test                                   # 108 tests
+make test                                   # 208 tests
 OMNITAG_REAL_MEDIA=~/Desktop/tp make test   # plus real-file assertions
 OMNITAG_LIVE=1 make test                    # plus live Audible/Audnexus checks
 make xctest                                 # same suite through the Xcode scheme

@@ -15,6 +15,8 @@ public struct MediaTagReader: Sendable {
         }
         return switch container {
         case .mkv: try MatroskaReader().read(url)
+        case .epub: try EPUBReader().read(url)
+        case .pdf: try PDFReader().read(url)
         default: try await AVTagReader().read(url)
         }
     }
@@ -24,13 +26,22 @@ public struct MediaTagReader: Sendable {
     public static func canRead(_ container: ContainerFormat) -> Bool {
         switch container {
         case .mkv, .mp3, .m4a, .m4b, .mp4, .mov, .m4v, .wav, .aiff, .aac: true
+        case .epub, .pdf: true
         case .flac, .ogg, .opus, .avi: false
         }
+    }
+
+    /// Narrower still: a PDF's "cover" is a rendering of page one, not stored
+    /// art, and an EPUB can only replace a cover it already has. mkv artwork
+    /// lives in an AttachedFile we do not write yet.
+    public static func canWriteArtwork(_ container: ContainerFormat) -> Bool {
+        container.isMPEG4Family || container == .mp3 || container == .epub
     }
 
     /// Writing is narrower than reading, and saying so is the honest UI.
     public static func canWrite(_ container: ContainerFormat) -> Bool {
         container.isMPEG4Family || container == .mp3 || container == .mkv
+            || container == .epub || container == .pdf
     }
 }
 
@@ -52,6 +63,10 @@ public struct MediaTagWriter: Sendable {
             try await ID3TagWriter(backups: backups).write(tags, artwork: artwork, to: url)
         case .mkv:
             try await MatroskaTagWriter(backups: backups).write(tags, to: url)
+        case .epub:
+            try EPUBTagWriter(backups: backups).write(tags, artwork: artwork, to: url)
+        case .pdf:
+            try PDFTagWriter(backups: backups).write(tags, to: url)
         case _ where container.isMPEG4Family:
             if let chapters, !chapters.isEmpty {
                 try await MPEG4ChapterWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)

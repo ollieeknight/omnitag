@@ -53,7 +53,7 @@ struct AudibleClientTests {
 
         #expect(results.count > 1)
         let secretHistory = try #require(results.first { $0.title.contains("Secret History") })
-        #expect(secretHistory.asin == "B01M62H4JK")
+        #expect(secretHistory.id == "B01M62H4JK")
         #expect(secretHistory.authors == ["Mark Frost"])
         #expect(secretHistory.artworkURL != nil)
     }
@@ -118,7 +118,7 @@ struct AudnexusClientTests {
         #expect(book.narrators == ["Sheryl Lee"])
         #expect(book.publisher == "Audible Studios")
         #expect(book.year == 2017)
-        #expect(book.asin == "B01M11U23O")
+        #expect(book.id == "B01M11U23O")
         #expect(book.artworkURL?.absoluteString.hasSuffix(".jpg") == true)
 
         let tags = book.tagSet
@@ -188,21 +188,21 @@ final class RegionalStubTransport: StubTransport, @unchecked Sendable {
     }
 }
 
-@Suite("AudiobookMetadataService")
-struct AudiobookMetadataServiceTests {
-    private func service() throws -> (AudiobookMetadataService, StubTransport) {
+@Suite("AudibleProvider")
+struct AudibleProviderTests {
+    private func service() throws -> (AudibleProvider, StubTransport) {
         let transport = StubTransport()
         transport.responses["catalog/products?"] = try StubTransport.fixture("audible-search")
         transport.responses["/chapters"] = try StubTransport.fixture("audnexus-chapters")
         transport.responses["books/"] = try StubTransport.fixture("audnexus-book")
-        return (AudiobookMetadataService(region: .unitedKingdom, transport: transport), transport)
+        return (AudibleProvider(region: .unitedKingdom, transport: transport), transport)
     }
 
     @Test("searches Audible and enriches the chosen result from Audnexus")
     func searchThenDetails() async throws {
         let (service, _) = try service()
         let results = try await service.search(.init(keywords: "twin peaks"))
-        let details = try await service.details(for: try #require(results.first).asin)
+        let details = try await service.details(for: try #require(results.first).id)
 
         #expect(details.book.narrators == ["Sheryl Lee"])
         #expect(details.chapters.count == 6)
@@ -223,7 +223,7 @@ struct AudiobookMetadataServiceTests {
         let transport = RegionalStubTransport()
         transport.emptyHosts = ["api.audible.co.uk"]
         transport.responses["catalog/products?"] = try StubTransport.fixture("audible-search")
-        let service = AudiobookMetadataService(region: .unitedKingdom, transport: transport)
+        let service = AudibleProvider(region: .unitedKingdom, transport: transport)
 
         let outcome = try await service.searchWithRegion(.init(keywords: "laura palmer"))
         #expect(outcome.region == .unitedStates, "the UK storefront does not stock every book")
@@ -237,7 +237,7 @@ struct AudiobookMetadataServiceTests {
         transport.regionalErrors = ["region=uk": Data(#"{"error":{"code":"REGION_UNAVAILABLE"}}"#.utf8)]
         transport.responses["/chapters"] = try StubTransport.fixture("audnexus-chapters")
         transport.responses["books/"] = try StubTransport.fixture("audnexus-book")
-        let service = AudiobookMetadataService(region: .unitedKingdom, transport: transport)
+        let service = AudibleProvider(region: .unitedKingdom, transport: transport)
 
         let details = try await service.details(for: "B01M11U23O")
         #expect(details.book.narrators == ["Sheryl Lee"])
@@ -249,7 +249,7 @@ struct AudiobookMetadataServiceTests {
         let transport = RegionalStubTransport()
         transport.emptyKeywords = ["Secret Diary"]
         transport.responses["catalog/products?"] = try StubTransport.fixture("audible-search")
-        let service = AudiobookMetadataService(region: .unitedStates, transport: transport)
+        let service = AudibleProvider(region: .unitedStates, transport: transport)
 
         let outcome = try await service.searchWithRegion(
             .init(title: "Secret Diary", author: "Jennifer Lynch"))
@@ -278,30 +278,30 @@ struct AudiobookMetadataServiceTests {
               "  https://www.audible.com/pd/The-Secret-Diary-Audiobook/B01M11U23O?ref=x  ",
           ])
     func parsesPastedASIN(text: String) {
-        #expect(AudiobookQuery.asin(fromPastedText: text) == "B01M11U23O")
+        #expect(MetadataQuery.asin(fromPastedText: text) == "B01M11U23O")
     }
 
     @Test("does not mistake ordinary words for an ASIN")
     func rejectsNonASIN() {
-        #expect(AudiobookQuery.asin(fromPastedText: "Twin Peaks") == nil)
-        #expect(AudiobookQuery.asin(fromPastedText: "") == nil)
+        #expect(MetadataQuery.asin(fromPastedText: "Twin Peaks") == nil)
+        #expect(MetadataQuery.asin(fromPastedText: "") == nil)
     }
 
     @Test("suggests a query from what the file already knows")
     func buildsQueryFromFile() {
         var tags = TagSet()
         tags[.asin] = .string("B01M11U23O")
-        #expect(AudiobookQuery(from: tags, filename: "book.m4b").asin == "B01M11U23O")
+        #expect(MetadataQuery(from: tags, filename: "book.m4b").asin == "B01M11U23O")
 
         var sparse = TagSet()
         sparse.title = "The Secret Diary of Laura Palmer"
         sparse[.author] = .string("Jennifer Lynch")
-        let query = AudiobookQuery(from: sparse, filename: "whatever.m4b")
+        let query = MetadataQuery(from: sparse, filename: "whatever.m4b")
         #expect(query.title == "The Secret Diary of Laura Palmer")
         #expect(query.author == "Jennifer Lynch")
 
         // Nothing useful in the tags: fall back to the filename.
-        let fromName = AudiobookQuery(from: TagSet(), filename: "The Secret Diary of Laura Palmer.m4b")
+        let fromName = MetadataQuery(from: TagSet(), filename: "The Secret Diary of Laura Palmer.m4b")
         #expect(fromName.keywords == "The Secret Diary of Laura Palmer")
     }
 }

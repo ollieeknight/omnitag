@@ -19,16 +19,7 @@ public struct ArtworkDownloader: Sendable {
             throw MetadataError.server(status: status)
         }
         
-        let mimeType = detectMimeType(from: data)
-        return Artwork(role: .cover, data: data, mimeType: mimeType)
-    }
-    
-    private func detectMimeType(from data: Data) -> String {
-        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
-        if data.count >= 8, data[0] == 0x89, data[1] == 0x50, data[2] == 0x4E, data[3] == 0x47 {
-            return "image/png"
-        }
-        // Default to jpeg if not explicitly PNG
-        return "image/jpeg"
+        guard !data.isEmpty else { throw MetadataError.server(status: status) }
+        return Artwork(role: .cover, data: data, mimeType: Artwork.sniffMimeType(data))
     }
 }
