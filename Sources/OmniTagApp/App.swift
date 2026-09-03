@@ -1,7 +1,7 @@
 import EditEngine
 import LibraryIndex
-import MetadataAPI
 import MediaCore
+import MetadataAPI
 import SwiftUI
 import TagIO
 
@@ -55,22 +55,35 @@ struct OmniTagApp: App {
                     .disabled(!model.canRedo)
             }
         }
+
+        Settings {
+            PreferencesView()
+        }
     }
 }
 
 @MainActor @Observable
 final class LibraryModel {
     var kind: MediaKind = .music
-    var items: [MediaItem] = []
+    /// Bumped whenever `items` is reassigned, so `visible`'s cache can check
+    /// "did the library change" in O(1) instead of comparing the whole array
+    /// (`MediaItem` is `Hashable` through `Artwork.data` — full equality on a
+    /// library with real covers would cost more than the filter it replaces).
+    private var itemsGeneration = 0
+    var items: [MediaItem] = [] {
+        didSet { itemsGeneration += 1 }
+    }
+
     var selection: Set<URL> = [] {
         didSet {
-            if let first = selectedItems.first {
+            if let first = selectedItems.first, first.container.isAVPlayerPlayable {
                 player.load(url: first.url)
             } else {
                 player.stop()
             }
         }
     }
+
     var search = ""
     var status = "No folder loaded"
     var canUndo = false
@@ -87,27 +100,67 @@ final class LibraryModel {
     var failures: [SaveFailure] = []
     var sortOrder = [KeyPathComparator(\MediaItem.displayTitle)]
     let player = AudioPlayerModel()
+    let thumbnails = ThumbnailCache()
     private let engine = EditEngine(writer: FileTagWriter())
 
-    // ponytail: filters and sorts on every read, and the table reads it several
-    // times per redraw. Cache it against kind/search/sortOrder if a library
-    // large enough to stutter while typing ever turns up.
+    /// Every input `visible` filters/sorts by, cheap to compare: `items`
+    /// itself is represented by `itemsGeneration` rather than the array's
+    /// value (`MediaItem` equality walks artwork bytes — too costly to use
+    /// as a cache-invalidation check on every read).
+    private struct VisibleCacheKey: Equatable {
+        var itemsGeneration: Int
+        var kind: MediaKind
+        var search: String
+        var showUnsavedOnly: Bool
+        var dirtyURLs: Set<URL>
+        var sortOrder: [KeyPathComparator<MediaItem>]
+    }
+
+    private var visibleCache: (key: VisibleCacheKey, result: [MediaItem])?
+
+    /// Filters and sorts `items` for the current tab. The table reads this
+    /// several times per redraw; cached against every input it depends on so
+    /// typing in the search field or resorting a column does not re-filter
+    /// and re-sort the whole library on every unrelated redraw too.
     var visible: [MediaItem] {
-        items.filter { $0.kind == kind }
+        let key = VisibleCacheKey(
+            itemsGeneration: itemsGeneration, kind: kind, search: search,
+            showUnsavedOnly: showUnsavedOnly, dirtyURLs: dirtyURLs, sortOrder: sortOrder
+        )
+        if let visibleCache, visibleCache.key == key {
+            return visibleCache.result
+        }
+
+        let result = items.filter { $0.kind == kind }
             .filter { showUnsavedOnly ? dirtyURLs.contains($0.url) : true }
             .filter { search.isEmpty || $0.searchText.localizedCaseInsensitiveContains(search) }
             .sorted(using: sortOrder)
+        visibleCache = (key, result)
+        return result
     }
 
-    var selectedItems: [MediaItem] { visible.filter { selection.contains($0.url) } }
+    /// How many library items are filed under each kind — shown as a sidebar
+    /// badge so adding a mixed folder while on one tab doesn't look like
+    /// files vanished; they are just filed under a different tab.
+    func count(for kind: MediaKind) -> Int {
+        items.count { $0.kind == kind }
+    }
+
+    var selectedItems: [MediaItem] {
+        visible.filter { selection.contains($0.url) }
+    }
 
     /// Whether any provider serves the current tab. Movies and TV have none
     /// yet, and the wizard says so rather than opening onto nothing.
-    var kindHasProvider: Bool { !MetadataProviders.serving(kind).isEmpty }
+    var kindHasProvider: Bool {
+        !MetadataProviders.serving(kind).isEmpty
+    }
 
     /// Fields shared by the whole selection; anything conflicting reads empty
     /// and shows a "multiple values" placeholder.
-    var commonTags: TagSet { TagSet.common(of: selectedItems.map(\.tags)) }
+    var commonTags: TagSet {
+        TagSet.common(of: selectedItems.map(\.tags))
+    }
 
     func pickFolder() {
         let panel = NSOpenPanel()
@@ -142,14 +195,14 @@ final class LibraryModel {
                 var isDirectory: ObjCBool = false
                 let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
                 if exists, isDirectory.boolValue {
-                    scanned.append(contentsOf: try await scanner.scan(url))
+                    try await scanned.append(contentsOf: scanner.scan(url))
                 } else if let container = ContainerFormat(pathExtension: url.pathExtension) {
-                    scanned.append(MediaItem(url: url, kind: Self.detectKind(url: url, defaultKind: self.kind), container: container))
+                    scanned.append(MediaItem(url: url, kind: Self.detectKind(url: url, defaultKind: kind), container: container))
                 }
             }
             // Smart auto-classifier: assign kind based on format and naming heuristics.
             for index in scanned.indices {
-                scanned[index].kind = Self.detectKind(url: scanned[index].url, defaultKind: self.kind)
+                scanned[index].kind = Self.detectKind(url: scanned[index].url, defaultKind: kind)
             }
 
             // add, never load: load resets the saved baseline and would mark
@@ -174,19 +227,45 @@ final class LibraryModel {
     }
 
     /// Auto-detects media kind from file extension and filename patterns.
-    private static func detectKind(url: URL, defaultKind: MediaKind) -> MediaKind {
+    ///
+    /// Movie vs TV is decided by the filename alone, never by which sidebar
+    /// tab happens to be active — trusting the current tab meant a folder
+    /// scan run from the TV tab could silently mis-file an unrelated movie.
+    /// A user can always move a misclassified file via the sidebar's drag
+    /// reassignment.
+    static func detectKind(url: URL, defaultKind: MediaKind) -> MediaKind {
         let ext = url.pathExtension.lowercased()
-        if ext == "m4b" { return .audiobook }
-        if ext == "epub" || ext == "pdf" { return .book }
-        let name = url.lastPathComponent
-        if (ext == "mkv" || ext == "mp4" || ext == "mov" || ext == "m4v") {
-            if name.range(of: #"[Ss]\d+[Ee]\d+|\d+x\d+"#, options: .regularExpression) != nil {
-                return .tvEpisode
-            }
-            if defaultKind == .tvEpisode || defaultKind == .movie { return defaultKind }
-            return .movie
+        if ext == "m4b" {
+            return .audiobook
+        }
+        if ext == "epub" || ext == "pdf" {
+            return .book
+        }
+        if isVideo(ext) {
+            return hasEpisodePattern(url.lastPathComponent) ? .tvEpisode : .movie
         }
         return defaultKind
+    }
+
+    private static func isVideo(_ ext: String) -> Bool {
+        ext == "mkv" || ext == "mp4" || ext == "mov" || ext == "m4v"
+    }
+
+    private static func hasEpisodePattern(_ filename: String) -> Bool {
+        filename.range(of: #"[Ss]\d+[Ee]\d+|\d+x\d+"#, options: .regularExpression) != nil
+    }
+
+    /// Why a video file's kind was guessed, shown in the inspector so a
+    /// misclassification is explainable rather than a silent surprise — see
+    /// `docs/MOVIES_TV.md`'s "Fifth pass" for the friction this addresses.
+    /// `nil` for every other kind: an m4b, epub, mp3 etc. has no ambiguity to
+    /// explain, so no note is shown for them.
+    static func kindGuessReason(url: URL, kind: MediaKind) -> String? {
+        let ext = url.pathExtension.lowercased()
+        guard isVideo(ext) else { return nil }
+        return hasEpisodePattern(url.lastPathComponent)
+            ? "Detected from the filename's SxxEyy pattern."
+            : "No season/episode pattern found in the filename, so this defaulted to Movie."
     }
 
     func setKind(_ newKind: MediaKind) async {
@@ -203,11 +282,11 @@ final class LibraryModel {
         await refresh()
     }
 
-    func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?) async {
+    func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, clearing: Set<TagKey> = []) async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
-        let sized = artwork.compactMap { CoverImage.artwork(from: $0.data, role: $0.role) }
-        await engine.applySnapshot(tags: tags, artwork: sized, chapters: chapters, to: urls)
+        let sized = artwork.compactMap { CoverImage.artwork(from: $0.data, role: $0.role, maxPixels: CoverImage.defaultMaxPixels) }
+        await engine.applySnapshot(tags: tags, artwork: sized, chapters: chapters, clearing: clearing, to: urls)
         await refresh()
     }
 
@@ -223,7 +302,7 @@ final class LibraryModel {
     /// Reads a dropped or chosen image file, preserving original quality by default.
     func setArtwork(fromFile url: URL) async {
         guard let data = try? Data(contentsOf: url),
-              let artwork = CoverImage.artwork(from: data) else {
+              let artwork = CoverImage.artwork(from: data, maxPixels: CoverImage.defaultMaxPixels) else {
             status = "\(url.lastPathComponent) is not an image OmniTag can read"
             return
         }
@@ -258,7 +337,7 @@ final class LibraryModel {
               let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let data = bitmap.representation(using: .jpeg, properties: [:]) ?? bitmap.representation(using: .png, properties: [:]),
-              let artwork = CoverImage.artwork(from: data)
+              let artwork = CoverImage.artwork(from: data, maxPixels: CoverImage.defaultMaxPixels)
         else {
             status = "No image on clipboard"
             return
@@ -277,11 +356,29 @@ final class LibraryModel {
 
     // MARK: - Chapter Editing in Main UI
 
+    /// Single-file chapter edit: one book's chapter list does not belong in
+    /// every part file, so this never fans out across a multi-file selection.
     func applyChapters(_ chapters: [Chapter]) async {
-        let urls = Array(selection)
-        guard !urls.isEmpty else { return }
-        await engine.applyChapters(chapters, to: urls)
+        guard let item = selectedItems.first else { return }
+        await engine.applyChapters(chapters, to: [item.url])
         await refresh()
+    }
+
+    func renameChapter(at index: Int, to title: String) async {
+        guard let item = selectedItems.first, item.chapters.indices.contains(index) else { return }
+        var chapters = item.chapters
+        chapters[index].title = title
+        await applyChapters(chapters)
+    }
+
+    func removeChapter(at index: Int) async {
+        guard let item = selectedItems.first, item.chapters.indices.contains(index) else { return }
+        var chapters = item.chapters
+        chapters.remove(at: index)
+        for i in chapters.indices {
+            chapters[i].index = i
+        }
+        await applyChapters(chapters)
     }
 
     func addChapter(at time: TimeInterval, title: String? = nil) async {
@@ -291,25 +388,9 @@ final class LibraryModel {
         let newTitle = title ?? "Chapter \(nextIndex + 1)"
         chapters.append(Chapter(index: nextIndex, start: time, title: newTitle))
         chapters.sort { $0.start < $1.start }
-        for i in chapters.indices { chapters[i].index = i }
-        await applyChapters(chapters)
-    }
-
-    func updateChapter(index: Int, title: String, start: TimeInterval) async {
-        guard let item = selectedItems.first, index < item.chapters.count else { return }
-        var chapters = item.chapters
-        chapters[index].title = title
-        chapters[index].start = max(0, start)
-        chapters.sort { $0.start < $1.start }
-        for i in chapters.indices { chapters[i].index = i }
-        await applyChapters(chapters)
-    }
-
-    func removeChapter(at index: Int) async {
-        guard let item = selectedItems.first, index < item.chapters.count else { return }
-        var chapters = item.chapters
-        chapters.remove(at: index)
-        for i in chapters.indices { chapters[i].index = i }
+        for i in chapters.indices {
+            chapters[i].index = i
+        }
         await applyChapters(chapters)
     }
 
@@ -321,7 +402,7 @@ final class LibraryModel {
     func rename(_ moves: [RenameMove]) async {
         guard !moves.isEmpty else { return }
         let outcome = await engine.rename(moves)
-        let table = Dictionary(moves.map { ($0.from, $0.to) }, uniquingKeysWith: { _, last in last })
+        let table = Dictionary(outcome.done.map { ($0.from, $0.to) }, uniquingKeysWith: { _, last in last })
         selection = Set(selection.map { table[$0] ?? $0 })
         // The player holds a URL that no longer exists; reloading it keeps the
         // transport bar pointing at the file the user can still see.
@@ -380,8 +461,15 @@ final class LibraryModel {
         NSWorkspace.shared.activateFileViewerSelecting(Array(selection))
     }
 
-    func undo() async { await engine.undo(); await refresh() }
-    func redo() async { await engine.redo(); await refresh() }
+    func undo() async {
+        await engine.undo()
+        await refresh()
+    }
+
+    func redo() async {
+        await engine.redo()
+        await refresh()
+    }
 
     func saveSelected() async {
         let selectedDirty = dirtyURLs.intersection(selection)
@@ -430,14 +518,40 @@ extension MediaItem {
          tags[.narrator]?.stringValue, tags[.asin]?.stringValue, url.lastPathComponent]
             .compactMap(\.self).joined(separator: " ")
     }
-    var displayTitle: String { tags.title ?? url.deletingPathExtension().lastPathComponent }
-    var displayArtist: String { tags.artist ?? tags.author ?? "" }
-    var displayAuthor: String { tags.author ?? tags.artist ?? "" }
-    var displayNarrator: String { tags[.narrator]?.stringValue ?? "" }
-    var displaySeries: String { tags.showName ?? tags[.series]?.stringValue ?? tags.album ?? "" }
-    var displaySeriesIndex: Int { tags[.seriesIndex]?.intValue ?? 0 }
-    var displayASIN: String { tags[.asin]?.stringValue ?? "" }
-    var displayISBN: String { tags[.isbn]?.stringValue ?? "" }
-    var chapterCount: Int { chapters.count }
-    var sortableDuration: TimeInterval { duration ?? 0 }
+
+    var displayTitle: String {
+        tags.title ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    var displayArtist: String {
+        tags.artist ?? tags.author ?? ""
+    }
+
+    var displayAuthor: String {
+        tags.author ?? tags.artist ?? ""
+    }
+
+    var displayNarrator: String {
+        tags[.narrator]?.stringValue ?? ""
+    }
+
+    var displaySeries: String {
+        tags.showName ?? tags[.series]?.stringValue ?? tags.album ?? ""
+    }
+
+    var displayASIN: String {
+        tags[.asin]?.stringValue ?? ""
+    }
+
+    var displayISBN: String {
+        tags[.isbn]?.stringValue ?? ""
+    }
+
+    var chapterCount: Int {
+        chapters.count
+    }
+
+    var sortableDuration: TimeInterval {
+        duration ?? 0
+    }
 }
