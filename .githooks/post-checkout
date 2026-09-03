@@ -1,0 +1,7 @@
+#!/bin/sh
+# Regenerates OmniTag.xcodeproj after a branch switch, so Xcode's index
+# never shows a stale "Cannot find X in scope" for a file that only exists
+# on the branch you just moved to (or only existed on the one you left).
+# See docs/DEVELOPMENT.md for why the project is generated, not committed.
+command -v xcodegen >/dev/null 2>&1 && xcodegen generate --quiet
+exit 0

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Regenerates OmniTag.xcodeproj after a merge/pull, for the same reason
+# post-checkout does — new files from the merge won't be in Xcode's index
+# until the project is regenerated. See docs/DEVELOPMENT.md.
+command -v xcodegen >/dev/null 2>&1 && xcodegen generate --quiet
+exit 0
