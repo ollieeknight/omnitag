@@ -68,10 +68,17 @@ public struct MediaTagWriter: Sendable {
         case .pdf:
             try PDFTagWriter(backups: backups).write(tags, to: url)
         case _ where container.isMPEG4Family:
-            if let chapters, !chapters.isEmpty {
-                try await MPEG4ChapterWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)
+            // A passthrough export drops the chapter text track, so a file that
+            // has chapters always goes through the remuxing writer — even when
+            // the caller only changed a title and passed no chapters at all.
+            var keep = chapters ?? []
+            if chapters == nil {
+                keep = await (try? AVTagReader().read(url))?.chapters ?? []
+            }
+            if keep.isEmpty {
+                try await MPEG4TagWriter(backups: backups).write(tags, artwork: artwork, to: url)
             } else {
-                try await MPEG4TagWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)
+                try await MPEG4ChapterWriter(backups: backups).write(tags, artwork: artwork, chapters: keep, to: url)
             }
         default:
             throw TagIOError.unsupportedContainer(container.rawValue)
