@@ -24,8 +24,8 @@ public struct AudnexusClient: Sendable {
     }
 
     public func book(asin: String) async throws -> MetadataRecord {
-        let (data, status) = try await transport.data(from: try url("/books/\(asin)"))
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        let (data, status) = try await transport.data(from: url("/books/\(asin)"))
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
         if let failure = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
             throw failure.error.code == "REGION_UNAVAILABLE"
                 ? MetadataError.notAvailable(region: region.rawValue)
@@ -39,8 +39,8 @@ public struct AudnexusClient: Sendable {
     }
 
     public func chapters(asin: String) async throws -> [Chapter] {
-        let (data, status) = try await transport.data(from: try url("/books/\(asin)/chapters"))
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        let (data, status) = try await transport.data(from: url("/books/\(asin)/chapters"))
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
         do {
             return try JSONDecoder.api.decode(ChapterResponse.self, from: data).chapters
                 .enumerated()
@@ -49,7 +49,8 @@ public struct AudnexusClient: Sendable {
                         index: index,
                         start: Double(chapter.startOffsetMs) / 1000,
                         duration: Double(chapter.lengthMs) / 1000,
-                        title: chapter.title)
+                        title: chapter.title
+                    )
                 }
         } catch {
             throw MetadataError.malformedResponse(error.localizedDescription)
@@ -69,13 +70,19 @@ public struct AudnexusClient: Sendable {
             var startOffsetMs: Int
             var title: String
         }
+
         var chapters: [Entry]
     }
 
     private struct Book: Decodable {
         struct Person: Decodable { var name: String }
-        struct Genre: Decodable { var name: String; var type: String }
-        struct Series: Decodable { var name: String?; var position: String? }
+        struct Genre: Decodable { var name: String
+            var type: String
+        }
+
+        struct Series: Decodable { var name: String?
+            var position: String?
+        }
 
         var asin: String
         var title: String
@@ -91,9 +98,13 @@ public struct AudnexusClient: Sendable {
         var seriesPrimary: Series?
         var runtimeLengthMin: Int?
         var image: String?
+        var isbn: String?
 
         var book: MetadataRecord {
-            MetadataRecord(
+            let filteredGenres = genres?.filter { $0.type == "genre" }.map(\.name) ?? []
+            let effectiveGenres = filteredGenres.isEmpty ? (genres?.map(\.name) ?? []) : filteredGenres
+
+            return MetadataRecord(
                 id: asin, title: title, subtitle: subtitle,
                 authors: authors?.map(\.name) ?? [],
                 narrators: narrators?.map(\.name) ?? [],
@@ -101,14 +112,15 @@ public struct AudnexusClient: Sendable {
                 year: releaseDate.flatMap { Int($0.prefix(4)) },
                 language: language,
                 summary: (description ?? summary).map(Self.strippingHTML),
-                // Audible hangs a dozen "tag" rungs off each genre; only the
-                // genres themselves belong in a genre field.
-                genres: genres?.filter { $0.type == "genre" }.map(\.name) ?? [],
+                genres: effectiveGenres,
                 series: seriesPrimary?.name,
                 seriesIndex: seriesPrimary?.position.flatMap { Int($0) },
                 runtimeMinutes: runtimeLengthMin,
                 artworkURL: image.flatMap { URL(string: $0) },
-                asin: asin, isbn: nil)
+                asin: asin,
+                isbn: (isbn?.isEmpty == true) ? nil : isbn,
+                kind: .audiobook
+            )
         }
 
         static func strippingHTML(_ html: String) -> String {
@@ -167,7 +179,8 @@ public struct AudibleProvider: Sendable {
                     if !results.isEmpty {
                         return SearchOutcome(
                             candidates: results.sorted { query.score($0) > query.score($1) },
-                            region: candidateRegion)
+                            region: candidateRegion
+                        )
                     }
                 } catch MetadataError.emptyQuery {
                     throw MetadataError.emptyQuery
@@ -176,7 +189,7 @@ public struct AudibleProvider: Sendable {
                 }
             }
         }
-        
+
         // OpenLibrary fallback
         let openLibrary = OpenLibraryClient(transport: transport)
         for rung in query.searchLadder.isEmpty ? [""] : query.searchLadder {
@@ -190,7 +203,8 @@ public struct AudibleProvider: Sendable {
                 if !results.isEmpty {
                     return SearchOutcome(
                         candidates: results.sorted { query.score($0) > query.score($1) },
-                        region: region)
+                        region: region
+                    )
                 }
             } catch MetadataError.emptyQuery {
                 throw MetadataError.emptyQuery
@@ -198,8 +212,10 @@ public struct AudibleProvider: Sendable {
                 lastError = error
             }
         }
-        
-        if let lastError { throw lastError }
+
+        if let lastError {
+            throw lastError
+        }
         return SearchOutcome(candidates: [], region: region)
     }
 
@@ -211,7 +227,7 @@ public struct AudibleProvider: Sendable {
             let book = try await client.book(key: asin)
             return MetadataDetails(book: book, chapters: [])
         }
-        
+
         let regions = preferredRegion.map { $0 == .unitedStates ? [$0] : [$0, .unitedStates] }
             ?? fallbackRegions
         var lastError: (any Error)?
@@ -219,8 +235,27 @@ public struct AudibleProvider: Sendable {
         for candidateRegion in regions {
             let client = AudnexusClient(region: candidateRegion, transport: transport)
             do {
-                let book = try await client.book(asin: asin)
-                let chapters = (try? await client.chapters(asin: asin)) ?? []
+                var book = try await client.book(asin: asin)
+                let chapters = await (try? client.chapters(asin: asin)) ?? []
+
+                if book.series == nil {
+                    let audible = AudibleClient(region: candidateRegion, transport: transport)
+                    if let prod = try? await audible.product(asin: asin) {
+                        if book.series == nil {
+                            book.series = prod.series
+                        }
+                        if book.seriesIndex == nil {
+                            book.seriesIndex = prod.seriesIndex
+                        }
+                        if book.publisher == nil {
+                            book.publisher = prod.publisher
+                        }
+                        if book.year == nil {
+                            book.year = prod.year
+                        }
+                    }
+                }
+
                 return MetadataDetails(book: book, chapters: chapters)
             } catch {
                 lastError = error
