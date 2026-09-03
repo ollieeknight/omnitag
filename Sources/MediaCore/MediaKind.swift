@@ -42,4 +42,14 @@ public enum ContainerFormat: String, Sendable, CaseIterable, Codable, Hashable {
         default: false
         }
     }
+
+    /// Formats AVPlayer can play natively on macOS.
+    public var isAVPlayerPlayable: Bool {
+        switch self {
+        case .mp3, .m4a, .m4b, .wav, .aiff, .aac, .flac, .mp4, .mov, .m4v:
+            true
+        default:
+            false
+        }
+    }
 }
