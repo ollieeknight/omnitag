@@ -37,18 +37,26 @@ public struct MetadataQuery: Sendable, Equatable {
     /// rung returns results.
     public var searchLadder: [String] {
         var rungs: [String] = []
-        if let keywords, !keywords.isEmpty { rungs.append(keywords) }
+        if let keywords, !keywords.isEmpty {
+            rungs.append(keywords)
+        }
         if let title, !title.isEmpty {
             rungs.append(title)
-            if let author, !author.isEmpty { rungs.append("\(title) \(author)") }
+            if let author, !author.isEmpty {
+                rungs.append("\(title) \(author)")
+            }
         } else if let author, !author.isEmpty {
             rungs.append(author)
         }
-        if let narrator, !narrator.isEmpty, rungs.isEmpty { rungs.append(narrator) }
+        if let narrator, !narrator.isEmpty, rungs.isEmpty {
+            rungs.append(narrator)
+        }
         return rungs
     }
 
-    public var searchTerms: String { searchLadder.first ?? "" }
+    public var searchTerms: String {
+        searchLadder.first ?? ""
+    }
 
     /// What the wizard's one search field reads and writes. An ASIN or an
     /// Audible link is routed to `asin` rather than to `keywords`, because the
@@ -77,9 +85,11 @@ public struct MetadataQuery: Sendable, Equatable {
         let wanted = (title ?? keywords ?? "").lowercased()
         let found = candidate.title.lowercased()
         if !wanted.isEmpty {
-            if found == wanted { score += 100 }
-            else if found.hasPrefix(wanted) || found.contains(wanted) { score += 60 }
-            else {
+            if found == wanted {
+                score += 100
+            } else if found.hasPrefix(wanted) || found.contains(wanted) {
+                score += 60
+            } else {
                 let words = Set(wanted.split(separator: " "))
                 let matched = words.filter { found.contains($0) }.count
                 score += words.isEmpty ? 0 : (40 * matched) / words.count
@@ -87,8 +97,11 @@ public struct MetadataQuery: Sendable, Equatable {
         }
         if let author, !author.isEmpty {
             let names = candidate.authors.map { $0.lowercased() }
-            if names.contains(author.lowercased()) { score += 80 }
-            else if names.contains(where: { $0.contains(author.lowercased()) }) { score += 50 }
+            if names.contains(author.lowercased()) {
+                score += 80
+            } else if names.contains(where: { $0.contains(author.lowercased()) }) {
+                score += 50
+            }
         }
         if let narrator, !narrator.isEmpty,
            candidate.narrators.contains(where: { $0.lowercased().contains(narrator.lowercased()) }) {
@@ -128,11 +141,13 @@ public struct MetadataQuery: Sendable, Equatable {
     static func cleanedFilename(_ filename: String) -> String {
         var name = (filename as NSString).deletingPathExtension
         name = name.replacingOccurrences(
-            of: #"[\[\(][^\]\)]*[\]\)]"#, with: " ", options: .regularExpression)
+            of: #"[\[\(][^\]\)]*[\]\)]"#, with: " ", options: .regularExpression
+        )
         name = name.replacingOccurrences(of: #"[_\.]+"#, with: " ", options: .regularExpression)
         name = name.replacingOccurrences(
             of: #"\b(unabridged|abridged|audiobook|m4b|mp3|\d{2,3}kbps)\b"#,
-            with: " ", options: [.regularExpression, .caseInsensitive])
+            with: " ", options: [.regularExpression, .caseInsensitive]
+        )
         return name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
@@ -175,6 +190,12 @@ public struct MetadataDetails: Sendable, Equatable {
 }
 
 public struct MetadataRecord: Sendable, Equatable {
+    /// What this record actually is, stated by the provider that built it —
+    /// not guessed from which optional fields happen to be set. `tagSet`
+    /// used to infer movie/TV-ness from director/studio/etc being non-nil,
+    /// which a movie with no credited director or content rating could slip
+    /// past; an explicit kind removes that whole class of bug.
+    public var kind: MediaKind
     public var id: String
     public var title: String
     public var subtitle: String?
@@ -194,25 +215,148 @@ public struct MetadataRecord: Sendable, Equatable {
     public var asin: String?
     public var isbn: String?
 
+    // MARK: movie / TV — TMDB
+
+    public var director: String?
+    public var studio: String?
+    public var contentRating: String?
+    public var showName: String?
+    public var seasonNumber: Int?
+    public var episodeNumber: Int?
+    public var episodeTitle: String?
+    public var tmdbID: String?
+
+    public init(
+        id: String, title: String, subtitle: String? = nil, authors: [String] = [],
+        narrators: [String] = [], publisher: String? = nil, year: Int? = nil,
+        language: String? = nil, summary: String? = nil, genres: [String] = [],
+        series: String? = nil, seriesIndex: Int? = nil, runtimeMinutes: Int? = nil,
+        artworkURL: URL? = nil, asin: String? = nil, isbn: String? = nil,
+        director: String? = nil, studio: String? = nil, contentRating: String? = nil,
+        showName: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil,
+        episodeTitle: String? = nil, tmdbID: String? = nil, kind: MediaKind = .audiobook
+    ) {
+        self.kind = kind
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.authors = authors
+        self.narrators = narrators
+        self.publisher = publisher
+        self.year = year
+        self.language = language
+        self.summary = summary
+        self.genres = genres
+        self.series = series
+        self.seriesIndex = seriesIndex
+        self.runtimeMinutes = runtimeMinutes
+        self.artworkURL = artworkURL
+        self.asin = asin
+        self.isbn = isbn
+        self.director = director
+        self.studio = studio
+        self.contentRating = contentRating
+        self.showName = showName
+        self.seasonNumber = seasonNumber
+        self.episodeNumber = episodeNumber
+        self.episodeTitle = episodeTitle
+        self.tmdbID = tmdbID
+    }
+
+    /// Shown under the title in the wizard's summary pane. A book has
+    /// authors, an audiobook falls back to narrators (see `MetadataCandidate.
+    /// byline`); a movie has a director instead, and a TV episode names its
+    /// show — neither has an "author" a reader would recognise.
+    public var byline: String {
+        if !authors.isEmpty {
+            return authors.joined(separator: ", ")
+        }
+        if !narrators.isEmpty {
+            return narrators.joined(separator: ", ")
+        }
+        if let director, !director.isEmpty {
+            return director
+        }
+        if let showName, !showName.isEmpty {
+            return showName
+        }
+        return ""
+    }
+
     /// The provider's answer expressed in OmniTag's own vocabulary, ready to be
     /// diffed against what the file currently says.
     public var tagSet: TagSet {
         var tags = TagSet()
         tags.title = title
-        if let subtitle, !subtitle.isEmpty { tags[.subtitle] = .string(subtitle) }
-        if !authors.isEmpty { tags[.author] = .string(authors.joined(separator: ", ")) }
-        if !authors.isEmpty { tags[.artist] = .string(authors.joined(separator: ", ")) }
-        if !narrators.isEmpty { tags[.narrator] = .string(narrators.joined(separator: ", ")) }
-        if let publisher { tags[.publisher] = .string(publisher) }
-        if let year { tags[.year] = .number(year) }
-        if !genres.isEmpty { tags.genre = genres.joined(separator: "/") }
-        if let summary, !summary.isEmpty { tags[.synopsis] = .string(summary) }
-        if let series { tags[.series] = .string(series) }
-        if let seriesIndex { tags[.seriesIndex] = .number(seriesIndex) }
-        if let asin { tags[.asin] = .string(asin) }
-        if let isbn { tags[.isbn] = .string(isbn) }
-        if let language { tags[.language] = .string(language) }
-        tags.album = title  // players group audiobooks by album
+        if let subtitle, !subtitle.isEmpty {
+            tags[.subtitle] = .string(subtitle)
+        }
+        if !authors.isEmpty {
+            let authorString = authors.joined(separator: ", ")
+            tags[.author] = .string(authorString)
+            tags[.artist] = .string(authorString)
+            tags[.albumArtist] = .string(authorString)
+        }
+        if !narrators.isEmpty {
+            let narratorString = narrators.joined(separator: ", ")
+            tags[.narrator] = .string(narratorString)
+            tags[.composer] = .string(narratorString)
+        }
+        if let publisher {
+            tags[.publisher] = .string(publisher)
+        }
+        if let year {
+            tags[.year] = .number(year)
+        }
+        if !genres.isEmpty {
+            tags.genre = genres.joined(separator: "/")
+        }
+        if let summary, !summary.isEmpty {
+            tags[.synopsis] = .string(summary)
+            tags[.comment] = .string(summary)
+        }
+        if let series {
+            tags[.series] = .string(series)
+        }
+        if let seriesIndex {
+            tags[.seriesIndex] = .number(seriesIndex)
+        }
+        if let asin {
+            tags[.asin] = .string(asin)
+        }
+        if let isbn {
+            tags[.isbn] = .string(isbn)
+        }
+        if let language {
+            tags[.language] = .string(language)
+        }
+        if let director {
+            tags[.director] = .string(director)
+        }
+        if let studio {
+            tags[.studio] = .string(studio)
+        }
+        if let contentRating {
+            tags[.contentRating] = .string(contentRating)
+        }
+        if let showName {
+            tags[.showName] = .string(showName)
+        }
+        if let seasonNumber {
+            tags[.seasonNumber] = .number(seasonNumber)
+        }
+        if let episodeNumber {
+            tags[.episodeNumber] = .number(episodeNumber)
+        }
+        if let episodeTitle {
+            tags[.episodeTitle] = .string(episodeTitle)
+        }
+        if let tmdbID {
+            tags[.tmdbID] = .string(tmdbID)
+        }
+        if kind != .movie, kind != .tvEpisode {
+            tags.album = title // players group audiobooks by album; movies/TV have no album concept
+        }
         return tags
     }
 }
