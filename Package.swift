@@ -9,7 +9,7 @@ let package = Package(
         .library(name: "TagIO", targets: ["TagIO"]),
         .library(name: "LibraryIndex", targets: ["LibraryIndex"]),
         .library(name: "EditEngine", targets: ["EditEngine"]),
-        .library(name: "MetadataAPI", targets: ["MetadataAPI"]),
+        .library(name: "MetadataAPI", targets: ["MetadataAPI"])
     ],
     targets: [
         .executableTarget(name: "OmniTagApp", dependencies: ["MediaCore", "TagIO", "LibraryIndex", "EditEngine", "MetadataAPI"]),
@@ -22,7 +22,9 @@ let package = Package(
         .testTarget(name: "TagIOTests", dependencies: ["TagIO", "LibraryIndex"]),
         .testTarget(name: "EditEngineTests", dependencies: ["EditEngine"]),
         .testTarget(
-            name: "MetadataAPITests", dependencies: ["MetadataAPI"],
-            resources: [.copy("Fixtures")]),
+            name: "MetadataAPITests", dependencies: ["MetadataAPI", "MediaCore", "TagIO", "EditEngine"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(name: "OmniTagAppTests", dependencies: ["OmniTagApp", "MediaCore", "MetadataAPI"])
     ]
 )
