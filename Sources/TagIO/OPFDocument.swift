@@ -1,5 +1,4 @@
 import Foundation
-import MediaCore
 
 /// The OPF package document — an EPUB's metadata lives in its `<metadata>`
 /// block as Dublin Core elements.
@@ -12,7 +11,6 @@ import MediaCore
 /// write — see `replacingMetadata`.
 struct OPFDocument {
     static let dublinCore = "http://purl.org/dc/elements/1.1/"
-    static let opf = "http://www.idpf.org/2007/opf"
 
     struct Element {
         var name: String // local name, namespace stripped

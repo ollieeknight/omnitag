@@ -1,19 +1,11 @@
-# KNOWN BROKEN on this machine's toolchain as of 2026-09-03: `periphery scan`
-# fails with "index store path does not exist" — this project's SwiftPM
-# build (Xcode 27 Beta) writes to a custom .build/out/ layout with no
-# libIndexStore-format store anywhere in it (Intermediates.noindex,
-# CompilationCache.noindex — a different indexing mechanism entirely), and
-# periphery hasn't caught up. Not a config mistake here — swiftformat and
-# swiftlint both work correctly against this same project. Revisit once
-# Xcode 27 leaves beta, or if periphery ships SwiftPM index-store support
-# for the newer build layout.
-targets:
-  - MediaCore
-  - TagIO
-  - LibraryIndex
-  - EditEngine
-  - MetadataAPI
-  - OmniTagApp
+# The original open-source `peripheryapp/periphery` went commercial and
+# archived on 2026-08-12 — the "index store path does not exist" failure
+# this project hit earlier was that tool being incompatible with this
+# machine's Xcode 27 Beta build layout, not a config mistake here. The
+# successor, `periphery-cli` (periphery-pro/tap, free tier for open-source/
+# indie/hobby projects, no account needed for the public scan workflow),
+# works against this project out of the box — no `targets:` key any more,
+# it scans every SwiftPM target automatically.
 retain_public: true
 retain_objc_accessible: true
 retain_unused_protocol_func_params: true

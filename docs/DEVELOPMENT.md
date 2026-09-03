@@ -52,10 +52,27 @@ make clean
 ```
 
 `swiftformat`/`swiftlint` configs live at `.swiftformat`/`.swiftlint.yml`
-(repo root). `periphery` (`.periphery.yml`) is currently broken on this
-machine's Xcode 27 Beta toolchain — the SwiftPM build layout it needs an
-index store from doesn't produce one in the format periphery expects. Not a
-config problem; revisit when the toolchain leaves beta.
+(repo root).
+
+### Dead-code scanning: `periphery-cli`, not `periphery`
+
+The original open-source `periphery` (Homebrew's `periphery` formula)
+transitioned to a commercial product and archived its GitHub repo on
+2026-08-12. `make audit` uses its successor, `periphery-cli`, installed from
+`periphery-pro/tap` — free for open-source/indie/hobby projects (currently
+in open beta, no account needed for the public scan workflow this repo
+uses). It requires the standalone Xcode Command Line Tools, separate from
+the Xcode app itself:
+
+```sh
+xcode-select --install                          # one-time, interactive
+brew install periphery-pro/tap/periphery-cli
+```
+
+`.periphery.yml` no longer needs a `targets:` key — `periphery-cli` scans
+every SwiftPM target automatically. If `brew uninstall periphery` (the old
+homebrew-core formula) is ever needed to avoid a name conflict, do that
+before installing `periphery-cli`.
 
 ## Testing against real media
 

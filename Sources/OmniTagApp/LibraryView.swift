@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @Bindable var model: LibraryModel
-    @State private var columns = TableColumnCustomization<MediaItem>()
+    @State private var columns = TableColumnCustomization<MediaItem>() // periphery:ignore - read via $columns, Table's columnCustomization: binding
     @State private var showInspector = true
     /// Non-nil while the removal confirmation is up, holding how many of the
     /// selected files have edits that were never written.
@@ -560,7 +560,7 @@ struct InspectorView: View {
             // items were classified independently and may have different
             // reasons, so no single caption could speak for all of them.
             if let item = model.selectedItems.first, model.selectedItems.count == 1,
-               let reason = LibraryModel.kindGuessReason(url: item.url, kind: item.kind) {
+               let reason = LibraryModel.kindGuessReason(url: item.url) {
                 Text(reason)
                     .font(.caption)
                     .foregroundStyle(.secondary)

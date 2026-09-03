@@ -47,22 +47,22 @@ struct KindGuessReasonTests {
     @Test("explains an SxxExx match")
     func explainsPatternMatch() {
         let url = URL(filePath: "/tmp/Show S01E01.mkv")
-        let reason = LibraryModel.kindGuessReason(url: url, kind: .tvEpisode)
+        let reason = LibraryModel.kindGuessReason(url: url)
         #expect(reason?.contains("SxxEyy") == true)
     }
 
     @Test("explains an ambiguous default to movie")
     func explainsAmbiguousDefault() {
         let url = URL(filePath: "/tmp/Some Movie (1992).mkv")
-        let reason = LibraryModel.kindGuessReason(url: url, kind: .movie)
+        let reason = LibraryModel.kindGuessReason(url: url)
         #expect(reason?.contains("defaulted to Movie") == true)
     }
 
     @Test("no reason for kinds with no ambiguity to explain")
     func noReasonForUnambiguousKinds() {
-        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Book.m4b"), kind: .audiobook) == nil)
-        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Book.epub"), kind: .book) == nil)
-        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Track.mp3"), kind: .music) == nil)
+        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Book.m4b")) == nil)
+        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Book.epub")) == nil)
+        #expect(LibraryModel.kindGuessReason(url: URL(filePath: "/tmp/Track.mp3")) == nil)
     }
 }
 

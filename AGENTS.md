@@ -99,8 +99,11 @@ make app       # assemble .build/OmniTag.app
 make install   # symlink it into /Applications
 make lint      # warnings-as-errors, plus swiftformat --lint and swiftlint
 make format    # auto-fix formatting and lint violations (swiftformat, swiftlint --fix)
-make audit     # dead-code scan (periphery) — currently broken on this machine's
-               # toolchain, see .periphery.yml; swiftformat/swiftlint work fine
+make audit     # dead-code scan. Uses periphery-cli (periphery-pro/tap): the
+               # original open-source `periphery` went commercial and archived
+               # 2026-08-12. periphery-cli is the free-tier successor and
+               # requires the standalone Xcode Command Line Tools installed
+               # (`xcode-select --install`), separate from the Xcode app.
 make check     # lint + audit + test
 make hooks     # one-time per clone: enables git hooks that keep OmniTag.xcodeproj
                # in sync after checkout/merge — see docs/DEVELOPMENT.md

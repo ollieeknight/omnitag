@@ -8,8 +8,12 @@ import MediaCore
 /// `@State`, so it survives the table's cells being recreated on scroll.
 @MainActor
 final class ThumbnailCache {
+    /// Both fields drive synthesized `Hashable`/`Equatable` as a dictionary
+    /// key, never read directly.
     private struct Key: Hashable {
+        // periphery:ignore
         var url: URL
+        // periphery:ignore
         var dataHash: Int
     }
 

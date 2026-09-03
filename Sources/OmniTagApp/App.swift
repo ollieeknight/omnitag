@@ -107,12 +107,21 @@ final class LibraryModel {
     /// itself is represented by `itemsGeneration` rather than the array's
     /// value (`MediaItem` equality walks artwork bytes — too costly to use
     /// as a cache-invalidation check on every read).
+    // Every field below drives synthesized `Equatable`, never read directly —
+    // periphery:ignore for each, since its assign-only check does not know a
+    // struct's fields are "used" by comparing the whole value.
     private struct VisibleCacheKey: Equatable {
+        // periphery:ignore
         var itemsGeneration: Int
+        // periphery:ignore
         var kind: MediaKind
+        // periphery:ignore
         var search: String
+        // periphery:ignore
         var showUnsavedOnly: Bool
+        // periphery:ignore
         var dirtyURLs: Set<URL>
+        // periphery:ignore
         var sortOrder: [KeyPathComparator<MediaItem>]
     }
 
@@ -260,7 +269,7 @@ final class LibraryModel {
     /// `docs/MOVIES_TV.md`'s "Fifth pass" for the friction this addresses.
     /// `nil` for every other kind: an m4b, epub, mp3 etc. has no ambiguity to
     /// explain, so no note is shown for them.
-    static func kindGuessReason(url: URL, kind: MediaKind) -> String? {
+    static func kindGuessReason(url: URL) -> String? {
         let ext = url.pathExtension.lowercased()
         guard isVideo(ext) else { return nil }
         return hasEpisodePattern(url.lastPathComponent)
@@ -521,10 +530,6 @@ extension MediaItem {
 
     var displayTitle: String {
         tags.title ?? url.deletingPathExtension().lastPathComponent
-    }
-
-    var displayArtist: String {
-        tags.artist ?? tags.author ?? ""
     }
 
     var displayAuthor: String {

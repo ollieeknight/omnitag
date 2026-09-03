@@ -1,5 +1,4 @@
 import Foundation
-import MediaCore
 @testable import MetadataAPI
 import Testing
 

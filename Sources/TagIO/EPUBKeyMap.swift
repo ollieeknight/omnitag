@@ -18,10 +18,6 @@ public enum EPUBKeyMap {
         dublinCore.first { $0.element == name }?.key
     }
 
-    static func element(for key: TagKey) -> String? {
-        dublinCore.first { $0.key == key }?.element
-    }
-
     /// Everything the writer manages. Anything else in the metadata block is
     /// left exactly where it is.
     static var managedKeys: Set<TagKey> {

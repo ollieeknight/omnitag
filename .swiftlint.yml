@@ -64,6 +64,13 @@ nesting:
   type_level:
     warning: 2
 
+# `MatroskaReader`/`MatroskaTagWriter` each use `private enum ID` purely as
+# a namespace for EBML element-ID constants — never instantiated, so the
+# 3-character minimum a real type name would want does not apply.
+type_name:
+  excluded:
+    - ID
+
 identifier_name:
   min_length:
     warning: 1

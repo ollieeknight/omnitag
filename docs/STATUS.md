@@ -27,6 +27,7 @@ session trusts it.
 | Wizard test coverage | `OmniTagAppTests` (new): `MetadataWizardModel.buildSnapshot()`, the mkv-artwork skip, the multi-file chapter/episode guards, and TV show-vs-episode routing, all driven against a fake `MetadataProvider` — no network, no view rendering. |
 | Filenames | `FilenamePattern` renders tags into a name and parses a name back into tags. Rename sheet with live preview, presets, collision and missing-field refusals; renames are undoable. See `FILENAMES.md`. |
 | Tests | 311, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
+| Tooling | `make check` (lint + audit + test) passes end to end. `make audit` uses `periphery-cli`, the free-tier successor to the archived open-source `periphery` — see `docs/DEVELOPMENT.md`. |
 
 ## Does not work yet
 
