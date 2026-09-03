@@ -17,8 +17,9 @@ Read these before writing anything. They are short and they are current.
 | `docs/DISTRIBUTION.md` | Homebrew and signing |
 | `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the metadata wizard |
 | `docs/BOOKS.md` | EPUB and PDF, the zip writer, and the OpenLibrary provider |
+| `docs/FILENAMES.md` | the `%field%` pattern language, renaming, and parsing names |
 
-"Read the docs and do X" means: those nine, then X. If X is not in the roadmap,
+"Read the docs and do X" means: those ten, then X. If X is not in the roadmap,
 say where it fits before starting.
 
 When you finish a piece of work, update `STATUS.md` and tick the roadmap entry
@@ -59,13 +60,15 @@ Swift 6.4, SwiftUI, SwiftPM, macOS 15+. Zero third-party dependencies.
 ## Layout
 
 ```
-Sources/MediaCore     domain model. Foundation only — no AVFoundation, no SwiftUI
+Sources/MediaCore     domain model + FilenamePattern. Foundation only — no
+                      AVFoundation, no SwiftUI
 Sources/TagIO         MediaTagReader / MediaTagWriter (facades), AVTagReader,
                       MatroskaReader + MatroskaTagWriter, EBMLReader/EBMLWriter,
                       MPEG4TagWriter, ID3TagWriter, ID3v2, ZipArchive,
                       EPUBReader/EPUBTagWriter/OPFDocument, PDF read+write,
                       CoverImage, key maps, TagBackupStore
-Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter
+Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter,
+                      RenamePlan
 Sources/MetadataAPI   MetadataProvider protocol, AudibleClient, AudnexusClient,
                       AudibleProvider, OpenLibraryProvider
 Sources/LibraryIndex  LibraryScanner

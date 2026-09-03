@@ -8,10 +8,12 @@ one side of a table only.
 
 | Container | Read | Write | Backend |
 |---|---|---|---|
-| m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags, chapters | AVFoundation |
-| mp3 | ✅ ID3v2 tags | ✅ writes v2.4 | AVFoundation read, `ID3TagWriter` write |
+| m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags, chapters, artwork | AVFoundation read/write, `MPEG4ChapterWriter` |
+| mp3 | ✅ ID3v2 tags, artwork | ✅ ID3v2.4 tags, artwork | AVFoundation read, `ID3TagWriter` write |
 | wav, aiff | ✅ basic | ❌ | AVFoundation |
 | mkv | ✅ tags, chapters, cover attachments | ✅ tags (in-place patch) | `MatroskaReader` / `MatroskaTagWriter` |
+| epub | ✅ tags, artwork, chapters (read-only) | ✅ tags, artwork | `EPUBReader` / `EPUBTagWriter` |
+| pdf | ✅ tags, artwork (preview only), chapters (read-only) | ✅ tags | `PDFReader` / `PDFTagWriter` |
 | flac, ogg, opus | ❌ listed only | ❌ | — |
 
 `MediaTagReader.canRead` / `canWrite` encodes this; keep them in step.

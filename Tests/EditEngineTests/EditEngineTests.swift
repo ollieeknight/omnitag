@@ -382,3 +382,63 @@ struct EditEngineRemovalTests {
         #expect(await engine.unsavedCount(among: [url("b")]) == 0)
     }
 }
+
+@Suite("EditEngine kind and chapter mutations")
+struct EditEngineKindAndChapterTests {
+    private func item(_ name: String, kind: MediaKind = .music, chapters: [Chapter] = []) -> MediaItem {
+        MediaItem(
+            url: URL(filePath: "/library/\(name).m4a"),
+            kind: kind,
+            container: .m4a,
+            chapters: chapters
+        )
+    }
+    private func url(_ name: String) -> URL { URL(filePath: "/library/\(name).m4a") }
+
+    @Test("setKind reassigns kind across selection and undoes")
+    func setKindReassignsAndUndoes() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        let u1 = url("a")
+        let u2 = url("b")
+        await engine.load([item("a", kind: .music), item("b", kind: .music)])
+
+        await engine.setKind(.audiobook, to: [u1, u2])
+        #expect(await engine.item(at: u1)?.kind == .audiobook)
+        #expect(await engine.item(at: u2)?.kind == .audiobook)
+        #expect(await engine.canUndo)
+
+        await engine.undo()
+        #expect(await engine.item(at: u1)?.kind == .music)
+        #expect(await engine.item(at: u2)?.kind == .music)
+
+        await engine.redo()
+        #expect(await engine.item(at: u1)?.kind == .audiobook)
+    }
+
+    @Test("applyChapters sorts by timestamp and supports undo/redo")
+    func applyChaptersAndUndo() async throws {
+        let engine = EditEngine(writer: SpyWriter())
+        let u1 = url("a")
+        let initial = [Chapter(index: 0, start: 0, title: "Intro")]
+        await engine.load([item("a", chapters: initial)])
+
+        let updated = [
+            Chapter(index: 1, start: 30, title: "Chapter 2"),
+            Chapter(index: 0, start: 0, title: "Prologue")
+        ]
+        await engine.applyChapters(updated, to: [u1])
+
+        let applied = await engine.item(at: u1)?.chapters
+        #expect(applied?.count == 2)
+        #expect(applied?[0].title == "Prologue")
+        #expect(applied?[0].start == 0)
+        #expect(applied?[1].title == "Chapter 2")
+        #expect(applied?[1].start == 30)
+
+        await engine.undo()
+        #expect(await engine.item(at: u1)?.chapters == initial)
+
+        await engine.redo()
+        #expect(await engine.item(at: u1)?.chapters.count == 2)
+    }
+}

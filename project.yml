@@ -52,6 +52,7 @@ targets:
         - package: OmniTag/MediaCoreTests
         - package: OmniTag/TagIOTests
         - package: OmniTag/EditEngineTests
+        - package: OmniTag/MetadataAPITests
       gatherCoverageData: true
       environmentVariables:
         # Point this at your own media to run the real-file assertions in Xcode.

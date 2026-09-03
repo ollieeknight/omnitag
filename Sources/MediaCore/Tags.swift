@@ -8,6 +8,33 @@ public enum TagKey: Sendable, Hashable, Codable {
     /// Anything a format carries that we do not model. Kept so a round-trip
     /// never silently destroys a frame the user cared about.
     case custom(String)
+
+    public static func standardFields(for kind: MediaKind) -> [(key: TagKey, label: String)] {
+        switch kind {
+        case .music:
+            return [(.title, "Title"), (.artist, "Artist"), (.albumArtist, "Album Artist"),
+             (.album, "Album"), (.genre, "Genre"), (.year, "Year"),
+             (.trackNumber, "Track"), (.trackTotal, "of"), (.composer, "Composer")]
+        case .audiobook:
+            return [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
+             (.narrator, "Narrator"), (.series, "Series"), (.seriesIndex, "Book #"),
+             (.publisher, "Publisher"), (.year, "Year"), (.genre, "Genre"),
+             (.asin, "ASIN"), (.synopsis, "Summary")]
+        case .book:
+            return [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
+             (.series, "Series"), (.seriesIndex, "Book #"), (.publisher, "Publisher"),
+             (.year, "Year"), (.genre, "Subjects"), (.language, "Language"),
+             (.isbn, "ISBN"), (.synopsis, "Description")]
+        case .movie:
+            return [(.title, "Title"), (.year, "Year"), (.director, "Director"),
+             (.studio, "Studio"), (.genre, "Genre"), (.contentRating, "Rating"),
+             (.synopsis, "Synopsis")]
+        case .tvEpisode:
+            return [(.showName, "Show"), (.seasonNumber, "Season"), (.episodeNumber, "Episode"),
+             (.episodeTitle, "Episode Title"), (.year, "Year"), (.director, "Director"),
+             (.genre, "Genre")]
+        }
+    }
 }
 
 public enum TagValue: Sendable, Hashable, Codable {

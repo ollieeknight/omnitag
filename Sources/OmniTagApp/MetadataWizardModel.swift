@@ -51,7 +51,7 @@ public final class MetadataWizardModel {
     public var candidate: MetadataCandidate?
     public var details: MetadataDetails?
 
-    public var tagDiff = TagDiff(current: TagSet(), proposed: TagSet())
+    public var tagDiff = TagDiff(current: TagSet(), proposed: TagSet(), kind: .audiobook)
     public var selectedTagKeys: Set<TagKey> = []
 
     /// The pairing as the provider returned it. `chapterDiff` is this with a
@@ -59,6 +59,7 @@ public final class MetadataWizardModel {
     /// twice does not compound.
     private var baseChapterDiff = ChapterDiff(current: [], proposed: [])
     public var chapterDiff = ChapterDiff(current: [], proposed: [])
+    public var selectedChapterIDs: Set<ChapterDiff.Row.ID> = []
     public var chapterStrategy: ChapterDiff.MergeStrategy = .takeTheirs {
         didSet {
             guard chapterStrategy != oldValue else { return }
@@ -70,6 +71,47 @@ public final class MetadataWizardModel {
     /// Apply button cannot be pressed twice.
     public var isApplying = false
     public var applyError: String?
+
+    public func shiftProposedDown(for selection: Set<Int>) {
+        let indices = selection.sorted().reversed()
+        var newRows = chapterDiff.rows
+        if let maxSelected = indices.first, maxSelected == newRows.count - 1 {
+            newRows.append(ChapterDiff.Row(index: newRows.count, current: nil, proposed: nil))
+        }
+        for index in indices {
+            let nextIndex = index + 1
+            guard nextIndex < newRows.count else { continue }
+            let temp = newRows[nextIndex].proposed
+            newRows[nextIndex].proposed = newRows[index].proposed
+            newRows[index].proposed = temp
+        }
+        chapterDiff.rows = newRows
+        for i in newRows.indices {
+            chapterDiff.rows[i] = ChapterDiff.Row(index: i, current: newRows[i].current, proposed: newRows[i].proposed)
+        }
+        selectedChapterIDs = Set(selection.map { $0 + 1 })
+    }
+
+    public func shiftProposedUp(for selection: Set<Int>) {
+        let indices = selection.sorted()
+        var newRows = chapterDiff.rows
+        for index in indices {
+            guard index > 0 else { continue }
+            let prevIndex = index - 1
+            let temp = newRows[prevIndex].proposed
+            newRows[prevIndex].proposed = newRows[index].proposed
+            newRows[index].proposed = temp
+        }
+        chapterDiff.rows = newRows
+        for i in newRows.indices {
+            chapterDiff.rows[i] = ChapterDiff.Row(index: i, current: newRows[i].current, proposed: newRows[i].proposed)
+        }
+        var newSelection = Set<Int>()
+        for idx in selection {
+            newSelection.insert(idx > 0 ? idx - 1 : 0)
+        }
+        selectedChapterIDs = newSelection
+    }
 
     /// Kept so stepping Back from the tags step restores the whole result list
     /// rather than the one row the user clicked.
@@ -163,7 +205,7 @@ public final class MetadataWizardModel {
             self.details = details
 
             let currentTags = TagSet.common(of: selectedItems.map(\.tags))
-            self.tagDiff = TagDiff(current: currentTags, proposed: details.book.tagSet)
+            self.tagDiff = TagDiff(current: currentTags, proposed: details.book.tagSet, kind: self.kind)
             // Everything the provider actually answered, ticked by default.
             self.selectedTagKeys = tagDiff.keys(for: .overwriteAll)
 
@@ -184,10 +226,6 @@ public final class MetadataWizardModel {
 
     public func renameChapters(with pattern: String) {
         chapterDiff = chapterDiff.renamingAll(with: pattern)
-    }
-
-    public func shiftChapters(by offset: TimeInterval) {
-        chapterDiff = chapterDiff.shiftingAll(by: offset)
     }
 
     /// Throw away the bulk edits and hand-typed titles, back to the strategy.

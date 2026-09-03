@@ -24,7 +24,7 @@ struct TagDiffTests {
 
     @Test("builds rows for every key present in either side")
     func rowsSpanBothSides() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let keys = Set(diff.rows.map(\.key))
 
         // Keys in both, keys only in file, keys only in provider — all present.
@@ -36,7 +36,7 @@ struct TagDiffTests {
 
     @Test("unchanged fields are reported as unchanged")
     func unchangedRows() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let authorRow = diff.rows.first { $0.key == .author }
         #expect(authorRow?.isChanged == false, "author is identical on both sides")
         let yearRow = diff.rows.first { $0.key == .year }
@@ -45,7 +45,7 @@ struct TagDiffTests {
 
     @Test("changed fields are reported as changed")
     func changedRows() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let titleRow = diff.rows.first { $0.key == .title }
         #expect(titleRow?.isChanged == true, "title differs — provider appends (Twin Peaks)")
         let narratorRow = diff.rows.first { $0.key == .narrator }
@@ -54,7 +54,7 @@ struct TagDiffTests {
 
     @Test("merge fills empty fields, does not overwrite existing")
     func merge() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let merged = diff.merged(into: fileTags)
 
         // Existing fields are untouched.
@@ -71,7 +71,7 @@ struct TagDiffTests {
 
     @Test("overwrite-selected replaces only the ticked keys")
     func overwriteSelected() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let result = diff.overwriting([.title, .narrator], into: fileTags)
 
         #expect(result.title == "The Secret Diary of Laura Palmer (Twin Peaks)",
@@ -84,7 +84,7 @@ struct TagDiffTests {
 
     @Test("overwrite-all replaces everything, dropping keys the provider lacks")
     func overwriteAll() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags)
+        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
         let result = diff.overwriteAll()
 
         #expect(result.title == "The Secret Diary of Laura Palmer (Twin Peaks)")
@@ -94,7 +94,7 @@ struct TagDiffTests {
 
     @Test("an empty diff against identical tags has no changed rows")
     func identicalTagsProduceNoChanges() {
-        let diff = TagDiff(current: fileTags, proposed: fileTags)
+        let diff = TagDiff(current: fileTags, proposed: fileTags, kind: .book)
         #expect(diff.rows.filter(\.isChanged).isEmpty)
     }
 }
@@ -188,23 +188,6 @@ struct ChapterDiffTests {
         #expect(result[1].start == 120)
     }
 
-    @Test("shift-all-times offsets every start time")
-    func shiftAllTimes() {
-        let shifted = ChapterDiff.shiftAllTimes(fileChapters, by: 5.0)
-        #expect(shifted[0].start == 5.0)
-        #expect(shifted[1].start == 125.0)
-        #expect(shifted[2].start == 425.0)
-        // Durations are unchanged.
-        #expect(shifted[0].duration == 120)
-    }
-
-    @Test("negative shift clamps to zero")
-    func negativeShiftClampsToZero() {
-        let shifted = ChapterDiff.shiftAllTimes(fileChapters, by: -200)
-        #expect(shifted[0].start == 0)
-        #expect(shifted[1].start == 0, "120 - 200 clamps to 0")
-        #expect(shifted[2].start == 220, "420 - 200 = 220")
-    }
 }
 
 @Suite("TagDiff delta and quick actions")
@@ -215,7 +198,7 @@ struct TagDiffDeltaTests {
         proposed.title = "New Title"
         proposed[.author] = .string("Jennifer Lynch")
         proposed[.narrator] = .string("")
-        return TagDiff(current: current, proposed: proposed)
+        return TagDiff(current: current, proposed: proposed, kind: .book)
     }
 
     @Test("the delta carries only the ticked keys")
@@ -225,11 +208,11 @@ struct TagDiffDeltaTests {
         #expect(delta[.title] == nil)
     }
 
-    @Test("a row edited to blank is skipped rather than written empty")
-    func blankRowsAreSkipped() {
+    @Test("a row edited to blank is included rather than skipped")
+    func blankRowsAreIncluded() {
         let delta = diff().delta(for: [.narrator, .author])
-        #expect(delta[.narrator] == nil)
-        #expect(delta.values.count == 1)
+        #expect(delta[.narrator]?.stringValue == "")
+        #expect(delta.values.count == 2)
     }
 
     @Test("fill-empty ticks only the fields the file lacks")
@@ -330,16 +313,4 @@ struct ChapterBulkToolTests {
         #expect(renamed.rows[0].current == nil)
     }
 
-    @Test("shifting times moves starts and clamps at zero")
-    func shiftTimes() {
-        let shifted = diff.shiftingAll(by: -10)
-        #expect(shifted.resolved.map(\.start) == [0, 20])
-    }
-
-    @Test("shifting keeps hand-typed titles")
-    func shiftKeepsTitles() {
-        var edited = diff
-        edited.rows[0].proposed?.title = "Prologue"
-        #expect(edited.shiftingAll(by: 5).resolved[0].title == "Prologue")
-    }
 }

@@ -5,29 +5,29 @@ import UniformTypeIdentifiers
 
 /// Prepares an image for embedding as cover art.
 ///
-/// Covers arrive at 3000 px from Audible and from people's own folders. Writing
-/// one of those verbatim into each of a 30-part audiobook is how a library
-/// balloons, so anything larger than `maxPixels` is resampled to JPEG. Anything
-/// already small enough is passed through byte-for-byte: re-encoding a cover
-/// that did not need it only loses quality.
+/// Validates image bytes via ImageIO. By default, original resolution and format
+/// are preserved untouched. Downsampling to JPEG is opt-in when `maxPixels` is provided.
 public enum CoverImage {
-    /// Comfortably above what any player renders, well below poster size.
-    public static let maxPixels = 1400
+    /// Suggested limit when downsampling is desired.
+    public static let defaultMaxPixels = 1400
     public static let quality = 0.85
 
     /// The bytes to embed, or `nil` if this is not an image at all.
-    public static func prepared(_ data: Data, maxPixels: Int = CoverImage.maxPixels) -> Data? {
+    /// If `maxPixels` is nil, returns original bytes unchanged for valid images.
+    public static func prepared(_ data: Data, maxPixels: Int? = nil) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0 else { return nil }
+
+        guard let limit = maxPixels else { return data }
 
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
         let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
-        guard max(width, height) > maxPixels else { return data }
+        guard max(width, height) > limit else { return data }
 
         guard let scaled = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            kCGImageSourceThumbnailMaxPixelSize: limit,
             kCGImageSourceCreateThumbnailWithTransform: true,
         ] as CFDictionary) else { return data }
 
@@ -42,8 +42,8 @@ public enum CoverImage {
     }
 
     /// The same, expressed as the `Artwork` the engine stores.
-    public static func artwork(from data: Data, role: Artwork.Role = .cover) -> Artwork? {
-        guard let prepared = prepared(data) else { return nil }
+    public static func artwork(from data: Data, role: Artwork.Role = .cover, maxPixels: Int? = nil) -> Artwork? {
+        guard let prepared = prepared(data, maxPixels: maxPixels) else { return nil }
         return Artwork(role: role, data: prepared, mimeType: Artwork.sniffMimeType(prepared))
     }
 }

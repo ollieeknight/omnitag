@@ -55,7 +55,7 @@ Left over: mkv chapters — see below.
 OpenLibrary behind it. See `BOOKS.md`. Left open: MOBI/AZW3, CBZ, adding a
 cover to an EPUB that has none, and editing an EPUB's table of contents.
 
-## 2. Metadata providers
+## 1. Metadata providers
 
 `MetadataProvider` protocol per `ARCHITECTURE.md`. Order matters:
 
@@ -73,7 +73,7 @@ must stay fully functional — providers enrich, nothing depends on them.
 
 ---
 
-## 3. Chapter editing
+## 2. Chapter editing
 
 ✅ **MPEG-4 chapter writing** is done via `MPEG4ChapterWriter` (remuxing with `AVAssetWriter`).
 
@@ -82,18 +82,23 @@ already has — this half is now mostly plumbing).
 
 ---
 
-## 4. Filename ↔ tag conversion
+## ✅ Done: filename ↔ tag conversion
 
-Two directions, both Mp3tag staples:
+`FilenamePattern` (`MediaCore`) tokenises `%field%` patterns and both renders
+and parses them; `RenamePlan` (`EditEngine`) turns a selection plus a pattern
+into a preview and the moves it implies; `EditEngine.rename` performs them and
+re-keys everything a URL identifies, so unsaved edits follow the file and ⌘Z
+moves it back. `applyTagDeltas` writes parsed names as one undoable batch.
+`RenameSheet` is the UI: two directions, per-kind presets, a field menu, and a
+row-by-row preview that refuses collisions and missing fields. See
+`FILENAMES.md`.
 
-- **Tag → filename**: a pattern like `%artist% - %title%` with a live preview
-  and a dry run. Renames go through the same undo stack as tag edits.
-- **Filename → tag**: parse `S01E01 - Northwest Passage` style names into
-  season/episode/title. Preview before applying; never guess silently.
+Left open: patterns that write into subfolders, and a scripting layer
+(`$num()`, `$upper()`) — neither has been asked for.
 
 ---
 
-## 5. flac and ogg/opus
+## 3. flac and ogg/opus
 
 Vorbis comments — a simple `KEY=value` list, roughly 60 lines to read and write.
 flac also has a `PICTURE` block for artwork. Lowest priority: no such files in

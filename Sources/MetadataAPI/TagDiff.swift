@@ -16,8 +16,10 @@ public struct TagDiff: Sendable {
 
     public var rows: [Row]
 
-    public init(current: TagSet, proposed: TagSet) {
-        let allKeys = Set(current.values.keys).union(proposed.values.keys)
+    public init(current: TagSet, proposed: TagSet, kind: MediaKind) {
+        let allKeys = Set(TagKey.standardFields(for: kind).map(\.key))
+            .union(current.values.keys)
+            .union(proposed.values.keys)
         rows = allKeys.sorted(by: { "\($0)" < "\($1)" }).map { key in
             Row(key: key, current: current[key], proposed: proposed[key])
         }
@@ -49,7 +51,6 @@ public struct TagDiff: Sendable {
         var result = TagSet()
         for row in rows where keys.contains(row.key) {
             guard let proposed = row.proposed else { continue }
-            if let text = proposed.stringValue, text.trimmingCharacters(in: .whitespaces).isEmpty { continue }
             result[row.key] = proposed
         }
         return result
@@ -58,7 +59,7 @@ public struct TagDiff: Sendable {
     /// Keys the wizard should tick for each of the three spec'd actions.
     public func keys(for action: MergeAction) -> Set<TagKey> {
         switch action {
-        case .merge: Set(rows.filter { $0.current == nil && $0.proposed != nil }.map(\.key))
+        case .merge: Set(rows.filter { $0.current == nil && !($0.proposed?.stringValue?.isEmpty ?? true) }.map(\.key))
         case .overwriteAll: Set(rows.filter { $0.proposed != nil }.map(\.key))
         case .none: []
         }
@@ -92,6 +93,12 @@ public struct ChapterDiff: Sendable {
         public let index: Int
         public let current: Chapter?
         public var proposed: Chapter?
+        
+        public init(index: Int, current: Chapter?, proposed: Chapter?) {
+            self.index = index
+            self.current = current
+            self.proposed = proposed
+        }
     }
 
     public var rows: [Row]
@@ -189,16 +196,6 @@ public struct ChapterDiff: Sendable {
         return copy
     }
 
-    /// Move every start time, for the intro a provider did not account for.
-    public func shiftingAll(by offset: TimeInterval) -> ChapterDiff {
-        var copy = self
-        copy.rows = copy.rows.map { row in
-            var updated = row
-            if let start = row.proposed?.start { updated.proposed?.start = max(0, start + offset) }
-            return updated
-        }
-        return copy
-    }
 
     /// Apply a rename pattern to every chapter. `%n%` becomes the 1-based index.
     public static func applyRenamePattern(_ pattern: String, to chapters: [Chapter]) -> [Chapter] {
@@ -209,12 +206,4 @@ public struct ChapterDiff: Sendable {
         }
     }
 
-    /// Shift every start time by a fixed offset. Negative shifts clamp to zero.
-    public static func shiftAllTimes(_ chapters: [Chapter], by offset: TimeInterval) -> [Chapter] {
-        chapters.map { chapter in
-            var shifted = chapter
-            shifted.start = max(0, chapter.start + offset)
-            return shifted
-        }
-    }
 }

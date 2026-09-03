@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     @State private var columns = TableColumnCustomization<MediaItem>()
+    @State private var showInspector = true
     /// Non-nil while the removal confirmation is up, holding how many of the
     /// selected files have edits that were never written.
     @State private var pendingRemoval: Int?
@@ -14,19 +15,42 @@ struct LibraryView: View {
     var body: some View {
         NavigationSplitView {
             List(MediaKind.allCases, id: \.self, selection: $model.kind) { kind in
-                Label(kind.title, systemImage: kind.symbol).tag(kind)
+                Label(kind.title, systemImage: kind.symbol)
+                    .tag(kind)
+                    .dropDestination(for: URL.self) { urls, _ in
+                        Task { await model.setKind(kind) }
+                        return true
+                    }
             }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
-            HSplitView {
-                table
-                InspectorView(model: model)
-                    .frame(minWidth: 300, idealWidth: 340)
+            Group {
+                if model.visible.isEmpty {
+                    emptyState
+                } else {
+                    table
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    if model.player.duration > 0 || model.player.currentURL != nil {
+                        Divider()
+                        playerBar
+                    }
+                    if shouldShowStatusBar {
+                        Divider()
+                        statusBar
+                    }
+                }
+                .background(.bar)
             }
             .navigationTitle(model.kind.title)
             .navigationSubtitle(subtitle)
             .toolbar { toolbar }
-            .overlay(alignment: .bottom) { statusBar }
+            .inspector(isPresented: $showInspector) {
+                InspectorView(model: model)
+                    .inspectorColumnWidth(min: 280, ideal: 300, max: 380)
+            }
             .confirmationDialog(
                 "Discard unsaved changes to ^[\(pendingRemoval ?? 0) file](inflect: true)?",
                 isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
@@ -48,7 +72,20 @@ struct LibraryView: View {
                 // new selection has to be a new view, not a reused one.
                 .id(model.selection)
             }
+            .sheet(isPresented: $model.showRenamer) {
+                RenameSheet(
+                    items: model.selectedItems, kind: model.kind,
+                    rename: { await model.rename($0) },
+                    applyTags: { await model.applyParsedTags($0) })
+                // Same rule as the wizard: the preview is seeded from the
+                // selection, so a new selection has to be a new view.
+                .id(model.selection)
+            }
         }
+    }
+
+    private var shouldShowStatusBar: Bool {
+        model.dirtyCount > 0 || model.saveProgress != nil || !model.failures.isEmpty
     }
 
     /// Removal purges the undo stack, so unsaved work gets a prompt. Files with
@@ -75,16 +112,21 @@ struct LibraryView: View {
             model.visible, selection: $model.selection,
             sortOrder: $model.sortOrder, columnCustomization: $columns
         ) {
+            TableColumn("Status") { item in
+                if model.dirtyURLs.contains(item.url) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.blue)
+                        .accessibilityLabel("Unsaved changes")
+                }
+            }
+            .width(min: 20, ideal: 30, max: 40)
+            .customizationID("status")
+
             TableColumn("Title", value: \.displayTitle) { item in
                 HStack(spacing: 8) {
                     coverThumbnail(item)
                     Text(item.displayTitle).lineLimit(1)
-                    if model.dirtyURLs.contains(item.url) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 6))
-                            .foregroundStyle(.orange)
-                            .accessibilityLabel("Unsaved changes")
-                    }
                 }
             }
             .customizationID("title")
@@ -113,7 +155,7 @@ struct LibraryView: View {
                     .font(.callout.monospaced())
                     .foregroundStyle(item.displayISBN.isEmpty ? .tertiary : .secondary)
             }
-            .width(120)
+            .width(min: 100, ideal: 120, max: 150)
             .customizationID("isbn")
             .defaultVisibility(model.kind == .book ? .visible : .hidden)
 
@@ -122,7 +164,7 @@ struct LibraryView: View {
                     .font(.callout.monospaced())
                     .foregroundStyle(item.displayASIN.isEmpty ? .tertiary : .secondary)
             }
-            .width(110)
+            .width(min: 90, ideal: 110, max: 140)
             .customizationID("asin")
             .defaultVisibility(model.kind == .audiobook ? .visible : .hidden)
 
@@ -131,14 +173,14 @@ struct LibraryView: View {
                     .monospacedDigit()
                     .foregroundStyle(item.chapters.isEmpty ? .tertiary : .primary)
             }
-            .width(70)
+            .width(min: 60, ideal: 70, max: 100)
             .customizationID("chapters")
 
             TableColumn("Format", value: \.container.rawValue) { item in
                 Text(item.container.rawValue.uppercased())
                     .foregroundStyle(MediaTagReader.canWrite(item.container) ? .primary : .secondary)
             }
-            .width(70)
+            .width(min: 60, ideal: 70, max: 100)
             .customizationID("format")
 
             TableColumn("Length", value: \.sortableDuration) { item in
@@ -146,7 +188,7 @@ struct LibraryView: View {
                     .monospacedDigit()
                     .foregroundStyle(item.duration == nil ? .tertiary : .primary)
             }
-            .width(80)
+            .width(min: 70, ideal: 80, max: 120)
             .customizationID("length")
             .defaultVisibility(model.kind == .book ? .hidden : .visible)
         }
@@ -154,10 +196,7 @@ struct LibraryView: View {
             contextMenu(for: selection)
         } primaryAction: { selection in
             model.selection = selection
-            model.revealSelected()
-        }
-        .overlay {
-            if model.visible.isEmpty { emptyState }
+            model.player.togglePlayPause()
         }
         .dropDestination(for: URL.self) { urls, _ in
             Task { await model.load(urls: urls) }
@@ -172,8 +211,8 @@ struct LibraryView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: model.isDropTarget)
-        .searchable(text: $model.search, prompt: "Search library")
-        .frame(minWidth: 520)
+        .searchable(text: $model.search, prompt: "Search \(model.kind.title.lowercased())")
+        .frame(minWidth: 480)
     }
 
     private var seriesHeading: String {
@@ -218,6 +257,23 @@ struct LibraryView: View {
             }
             Button {
                 model.selection = selection
+                model.showRenamer = true
+            } label: {
+                Label("Rename from Tags…", systemImage: "textformat.abc")
+            }
+            Menu("Set Kind") {
+                ForEach(MediaKind.allCases, id: \.self) { targetKind in
+                    Button {
+                        model.selection = selection
+                        Task { await model.setKind(targetKind) }
+                    } label: {
+                        Label(targetKind.title, systemImage: targetKind.symbol)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                model.selection = selection
                 model.revealSelected()
             } label: {
                 Label("Reveal in Finder", systemImage: "folder")
@@ -236,11 +292,11 @@ struct LibraryView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(model.items.isEmpty ? "No Files" : "Nothing Matches",
-                  systemImage: model.items.isEmpty ? "square.dashed" : "magnifyingglass")
+            Label(model.items.isEmpty ? "No \(model.kind.title)" : "No Matches",
+                  systemImage: model.items.isEmpty ? model.kind.symbol : "magnifyingglass")
         } description: {
             Text(model.items.isEmpty
-                 ? "Drag a folder here, or use Import. Files land in the \(model.kind.title) tab you are looking at."
+                 ? "Drag a folder or media files here, or use Import."
                  : "No \(model.kind.title.lowercased()) match “\(model.search)”.")
         } actions: {
             if model.items.isEmpty {
@@ -248,7 +304,20 @@ struct LibraryView: View {
                     .buttonStyle(.borderedProminent)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+        .dropDestination(for: URL.self) { urls, _ in
+            Task { await model.load(urls: urls) }
+            return true
+        } isTargeted: { model.isDropTarget = $0 }
+        .overlay {
+            if model.isDropTarget {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .padding(16)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     // MARK: - Chrome
@@ -256,48 +325,110 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
+            Button("Import…", systemImage: "plus") {
+                model.pickFiles()
+            }
+            .help("Import files (⌘O)")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             Button("Search Metadata", systemImage: "wand.and.stars") {
                 model.showWizard = true
             }
             .disabled(model.selection.isEmpty || !model.kindHasProvider)
+            .keyboardShortcut("l", modifiers: .command)
             .help(model.kindHasProvider
-                  ? "Look the selection up online (⌘L)"
+                  ? "Look up selection online (⌘L)"
                   : "No metadata provider covers \(model.kind.title) yet")
         }
 
         ToolbarSpacer(.fixed)
 
         ToolbarItem(placement: .automatic) {
-            Menu {
-                Button("Add Folder…", systemImage: "folder.badge.plus") { model.pickFolder() }
-                Button("Add Files…", systemImage: "doc.badge.plus") { model.pickFiles() }
-            } label: {
-                Label("Import", systemImage: "plus")
+            Toggle(isOn: Binding(get: { model.showUnsavedOnly }, set: { model.showUnsavedOnly = $0 })) {
+                Label("Unsaved Only", systemImage: "line.3.horizontal.decrease.circle")
             }
-            .help("Import files or folders")
+            .help("Show only files with unsaved changes")
         }
 
-        ToolbarSpacer(.fixed)
 
-        ToolbarItem(placement: .automatic) {
-            Button("Undo", systemImage: "arrow.uturn.backward") { Task { await model.undo() } }
-                .disabled(!model.canUndo)
-                .help("Undo last edit")
-        }
-
-        ToolbarItem(placement: .automatic) {
-            Button("Redo", systemImage: "arrow.uturn.forward") { Task { await model.redo() } }
-                .disabled(!model.canRedo)
-                .help("Redo")
-        }
 
         ToolbarSpacer(.flexible)
 
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Save", systemImage: "square.and.arrow.down") { Task { await model.save() } }
-                .disabled(model.dirtyCount == 0 || model.saveProgress != nil)
-                .help(model.dirtyCount == 0 ? "Nothing to save" : "Write \(model.dirtyCount) file(s) to disk")
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                withAnimation(.smooth(duration: 0.2)) {
+                    showInspector.toggle()
+                }
+            } label: {
+                Label("Inspector", systemImage: "sidebar.trailing")
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .help("Toggle Inspector (⌘⌥I)")
         }
+    }
+
+    private var playerBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                model.player.togglePlayPause()
+            } label: {
+                Image(systemName: model.player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.player.isPlaying ? "Pause audio" : "Play audio")
+
+            Button {
+                model.player.jump(by: -15)
+            } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .help("Rewind 15 seconds (⌘←)")
+            .keyboardShortcut(.leftArrow, modifiers: .command)
+
+            Button {
+                model.player.jump(by: 15)
+            } label: {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .help("Fast forward 15 seconds (⌘→)")
+            .keyboardShortcut(.rightArrow, modifiers: .command)
+
+            Text(model.player.formattedCurrentTime)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            Slider(
+                value: Binding(
+                    get: { model.player.progress },
+                    set: { model.player.progress = $0 }
+                )
+            )
+            .controlSize(.mini)
+
+            Text(model.player.formattedDuration)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            if model.kind == .audiobook {
+                Button {
+                    Task { await model.addChapter(at: model.player.currentTime) }
+                } label: {
+                    Label("Add Marker", systemImage: "bookmark.badge.plus")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+                .help("Add chapter at current audio timestamp")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private var statusBar: some View {
@@ -335,8 +466,6 @@ struct LibraryView: View {
         .font(.subheadline)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .glassEffect(.regular)
-        .padding(.bottom, 16)
         .animation(.easeOut(duration: 0.2), value: model.dirtyCount)
     }
 
@@ -354,9 +483,7 @@ struct InspectorView: View {
     var body: some View {
         Form {
             if model.selection.isEmpty {
-                ContentUnavailableView(
-                    "No Selection", systemImage: "square.dashed",
-                    description: Text("Select files to edit their tags."))
+                emptyInspector
             } else {
                 if !readOnlySelection.isEmpty {
                     Label(
@@ -366,6 +493,8 @@ struct InspectorView: View {
                         .font(.callout)
                 }
 
+                kindSection
+
                 artworkSection
 
                 Section(header: Text(header)) {
@@ -374,10 +503,46 @@ struct InspectorView: View {
                     }
                 }
 
-                chapterSection
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var emptyInspector: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: model.kind.symbol)
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+
+            Text(model.visible.isEmpty ? "No \(model.kind.title)" : "^[\(model.visible.count) \(model.kind.title.lowercased())](inflect: true)")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+
+            Text("Select files in the list to edit tags, cover art, and chapters.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Media Kind
+
+    private var kindSection: some View {
+        Section {
+            Picker("Kind", selection: Binding(
+                get: { model.selectedItems.first?.kind ?? model.kind },
+                set: { newKind in Task { await model.setKind(newKind) } }
+            )) {
+                ForEach(MediaKind.allCases, id: \.self) { kind in
+                    Label(kind.title, systemImage: kind.symbol).tag(kind)
+                }
+            }
+        }
     }
 
     // MARK: - Artwork
@@ -395,8 +560,13 @@ struct InspectorView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HStack {
-                    Button("Choose…") { model.pickArtwork() }
-                        .disabled(!canEditArtwork)
+                    Menu("Set…") {
+                        Button("Choose File…") { model.pickArtwork() }
+                        Button("Find in Folder") { Task { await model.findLocalArtwork() } }
+                        Button("Paste from Clipboard") { Task { await model.pasteArtwork() } }
+                    }
+                    .disabled(!canEditArtwork)
+
                     if commonArtwork != nil, canEditArtwork {
                         Button("Remove", role: .destructive) { Task { await model.setArtwork([]) } }
                     }
@@ -427,7 +597,7 @@ struct InspectorView: View {
                     Image(systemName: mixedArtwork ? "photo.on.rectangle.angled" : "photo")
                         .font(.title)
                         .foregroundStyle(.tertiary)
-                    Text(mixedArtwork ? "Multiple covers" : (canEditArtwork ? "Drop an image" : "No cover"))
+                    Text(mixedArtwork ? "Multiple covers" : (canEditArtwork ? "Drop image or ⌘V" : "No cover"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -445,6 +615,17 @@ struct InspectorView: View {
             return true
         } isTargeted: { isArtworkTargeted = $0 && canEditArtwork }
         .animation(.easeOut(duration: 0.15), value: isArtworkTargeted)
+        .contextMenu {
+            if canEditArtwork {
+                Button("Paste Cover") { Task { await model.pasteArtwork() } }
+                Button("Find in Folder") { Task { await model.findLocalArtwork() } }
+                Button("Choose File…") { model.pickArtwork() }
+                if commonArtwork != nil {
+                    Divider()
+                    Button("Remove Cover", role: .destructive) { Task { await model.setArtwork([]) } }
+                }
+            }
+        }
         .accessibilityLabel(commonArtwork == nil ? "No cover. Drop an image to set one." : "Cover art")
     }
 
@@ -479,27 +660,7 @@ struct InspectorView: View {
         bytes.formatted(.byteCount(style: .file))
     }
 
-    // MARK: - Chapters
 
-    @ViewBuilder
-    private var chapterSection: some View {
-        if let chapters = singleSelection?.chapters, !chapters.isEmpty {
-            Section("Chapters (\(chapters.count))") {
-                ForEach(chapters) { chapter in
-                    HStack {
-                        Text(LibraryView.formatted(chapter.start))
-                            .monospacedDigit().foregroundStyle(.secondary)
-                        Text(chapter.title).lineLimit(1)
-                    }
-                    .font(.caption)
-                }
-                if model.kindHasProvider {
-                    Button("Edit in Metadata Wizard…") { model.showWizard = true }
-                        .font(.caption)
-                }
-            }
-        }
-    }
 
     /// Files the user can edit on screen but not save: mkv, flac today.
     private var readOnlySelection: [MediaItem] {
@@ -610,3 +771,4 @@ extension MediaKind {
         }
     }
 }
+

@@ -19,7 +19,7 @@ Regenerating is safe and idempotent: `xcodegen generate` after any change to
 ## Command line
 
 ```sh
-make test      # swift test — the fast loop, 48 tests, ~1s
+make test      # swift test — the fast loop, 242 tests, ~1s
 make run       # swift run OmniTagApp
 make app       # assemble .build/OmniTag.app (ad-hoc signed)
 make install   # symlink that bundle into /Applications
@@ -46,7 +46,7 @@ to a temp directory first.
 
 ## Xcode specifics
 
-- Scheme `OmniTag` runs the app and all three test targets, with coverage on.
+- Scheme `OmniTag` runs the app and all test targets (`MediaCoreTests`, `TagIOTests`, `EditEngineTests`, `MetadataAPITests`), with coverage on.
 - Previews work on views in `Sources/OmniTagApp`. Views live in the app target,
   not in a package module, precisely so Previews are available.
 - Strict concurrency is set to `complete`. A data-race warning is a bug report,

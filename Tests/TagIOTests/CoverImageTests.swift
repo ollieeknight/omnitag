@@ -32,7 +32,15 @@ struct CoverImageTests {
         return try #require(properties?[kCGImagePropertyPixelWidth] as? Int)
     }
 
-    @Test("an oversized cover is resampled down to the limit")
+    @Test("default preserves original resolution untouched")
+    func preservesOriginalByDefault() throws {
+        let original = try png(2400)
+        let prepared = try #require(CoverImage.prepared(original))
+        #expect(prepared == original)
+        #expect(try pixelWidth(prepared) == 2400)
+    }
+
+    @Test("an oversized cover is resampled down when limit is given")
     func resamplesOversized() throws {
         let prepared = try #require(CoverImage.prepared(try png(2400), maxPixels: 600))
         #expect(try pixelWidth(prepared) == 600)
@@ -62,8 +70,10 @@ struct CoverImageTests {
     func artworkCarriesItsType() throws {
         let small = try #require(CoverImage.artwork(from: try png(200)))
         #expect(small.mimeType == "image/png")
-        let resampled = try #require(CoverImage.artwork(from: try png(3000)))
+        let full = try #require(CoverImage.artwork(from: try png(3000)))
+        #expect(full.mimeType == "image/png")
+        #expect(full.role == .cover)
+        let resampled = try #require(CoverImage.artwork(from: try png(3000), maxPixels: 1400))
         #expect(resampled.mimeType == "image/jpeg")
-        #expect(resampled.role == .cover)
     }
 }

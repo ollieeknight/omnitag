@@ -470,7 +470,6 @@ public struct MetadataWizardView: View {
                     .lineLimit(1)
             }
             .toggleStyle(.checkbox)
-            .disabled(row.wrappedValue.proposed == nil)
             .frame(width: 130, alignment: .leading)
             .accessibilityLabel("Write \(label(for: key))")
 
@@ -481,32 +480,31 @@ public struct MetadataWizardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 6) {
-                if row.wrappedValue.proposed != nil {
-                    TextField("New value", text: Binding(
-                        get: { row.wrappedValue.proposed?.stringValue ?? "" },
-                        set: { row.wrappedValue = retyped(row.wrappedValue, to: $0) }
-                    ), axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
-                    .padding(6)
-                    .background(Color(NSColor.textBackgroundColor), in: .rect(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                    .disabled(!isOn)
-                    .foregroundStyle(isOn ? .primary : .tertiary)
-                    .accessibilityLabel("New \(label(for: key))")
-
-                    if let providerValue, providerValue != row.wrappedValue.proposed?.stringValue {
-                        Button {
-                            row.wrappedValue.proposed = model.details?.book.tagSet[key]
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Restore the provider's value")
-                        .accessibilityLabel("Restore the provider's \(label(for: key))")
+                TextField("New value", text: Binding(
+                    get: { row.wrappedValue.proposed?.stringValue ?? "" },
+                    set: {
+                        row.wrappedValue = retyped(row.wrappedValue, to: $0)
+                        model.selectedTagKeys.insert(key)
                     }
-                } else {
-                    Text("—").foregroundStyle(.tertiary)
+                ), axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...4)
+                .padding(6)
+                .background(Color(NSColor.textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                .disabled(!isOn && row.wrappedValue.proposed == nil) // optionally keep disabled if completely untouched and unticked
+                .foregroundStyle(isOn ? .primary : .tertiary)
+                .accessibilityLabel("New \(label(for: key))")
+
+                if let providerValue, providerValue != row.wrappedValue.proposed?.stringValue {
+                    Button {
+                        row.wrappedValue.proposed = model.details?.book.tagSet[key]
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Restore the provider's value")
+                    .accessibilityLabel("Restore the provider's \(label(for: key))")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -552,13 +550,7 @@ public struct MetadataWizardView: View {
                             Button(pattern) { model.renameChapters(with: pattern) }
                         }
                     }
-                    Section("Shift every start time") {
-                        ForEach([-30.0, -10.0, -5.0, 5.0, 10.0, 30.0], id: \.self) { offset in
-                            Button(offset < 0 ? "\(Int(offset))s (earlier)" : "+\(Int(offset))s (later)") {
-                                model.shiftChapters(by: offset)
-                            }
-                        }
-                    }
+
                     Divider()
                     Button("Reset to \(model.chapterStrategy.rawValue)") { model.resetChapters() }
                 } label: {
@@ -567,6 +559,23 @@ public struct MetadataWizardView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Retitle or retime all \(model.chapterDiff.rows.count) chapters at once")
+
+                Divider()
+                    .frame(height: 16)
+
+                Button(action: { model.shiftProposedUp(for: model.selectedChapterIDs) }) {
+                    Image(systemName: "arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.selectedChapterIDs.isEmpty)
+                .help("Shift selected chapters up")
+
+                Button(action: { model.shiftProposedDown(for: model.selectedChapterIDs) }) {
+                    Image(systemName: "arrow.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.selectedChapterIDs.isEmpty)
+                .help("Shift selected chapters down")
 
                 Spacer()
 
@@ -593,14 +602,17 @@ public struct MetadataWizardView: View {
 
             Divider()
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach($model.chapterDiff.rows) { $row in
-                        chapterRow($row)
-                        Divider().padding(.leading, 16)
-                    }
+            List(selection: $model.selectedChapterIDs) {
+                ForEach($model.chapterDiff.rows) { $row in
+                    chapterRow($row)
+                        .tag(row.id)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                    
+                    Divider().padding(.leading, 16)
                 }
             }
+            .listStyle(.plain)
             .background(Color(NSColor.underPageBackgroundColor))
         }
     }

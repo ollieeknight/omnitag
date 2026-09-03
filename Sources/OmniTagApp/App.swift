@@ -22,14 +22,20 @@ struct OmniTagApp: App {
                 Button("Add Files…") { model.pickFiles() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Divider()
-                Button("Save Changes") { Task { await model.save() } }
+                Button("Save Selected") { Task { await model.saveSelected() } }
                     .keyboardShortcut("s")
+                    .disabled(model.selection.isEmpty || model.saveProgress != nil)
+                Button("Save All Changes") { Task { await model.save() } }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(model.dirtyCount == 0 || model.saveProgress != nil)
             }
             CommandMenu("Library") {
                 Button("Search Metadata…") { model.showWizard = true }
                     .keyboardShortcut("l")
                     .disabled(model.selection.isEmpty || !model.kindHasProvider)
+                Button("Rename from Tags…") { model.showRenamer = true }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(model.selection.isEmpty)
                 Button("Set Cover…") { model.pickArtwork() }
                     .disabled(model.selection.isEmpty)
                 Divider()
@@ -56,23 +62,31 @@ struct OmniTagApp: App {
 final class LibraryModel {
     var kind: MediaKind = .music
     var items: [MediaItem] = []
-    var selection: Set<URL> = []
+    var selection: Set<URL> = [] {
+        didSet {
+            if let first = selectedItems.first {
+                player.load(url: first.url)
+            } else {
+                player.stop()
+            }
+        }
+    }
     var search = ""
     var status = "No folder loaded"
     var canUndo = false
     var canRedo = false
     var dirtyCount = 0
     var showWizard = false
+    var showRenamer = false
     var isDropTarget = false
+    var showUnsavedOnly = false
     /// Which files differ from disk, so the table can mark them one by one
     /// rather than only counting them in the status bar.
     var dirtyURLs: Set<URL> = []
-    /// Files written / files to write, while a save is running. Chapter writes
-    /// remux the whole file, so this is a real wait worth showing.
     var saveProgress: (done: Int, total: Int)?
     var failures: [SaveFailure] = []
     var sortOrder = [KeyPathComparator(\MediaItem.displayTitle)]
-
+    let player = AudioPlayerModel()
     private let engine = EditEngine(writer: FileTagWriter())
 
     // ponytail: filters and sorts on every read, and the table reads it several
@@ -80,6 +94,7 @@ final class LibraryModel {
     // large enough to stutter while typing ever turns up.
     var visible: [MediaItem] {
         items.filter { $0.kind == kind }
+            .filter { showUnsavedOnly ? dirtyURLs.contains($0.url) : true }
             .filter { search.isEmpty || $0.searchText.localizedCaseInsensitiveContains(search) }
             .sorted(using: sortOrder)
     }
@@ -129,12 +144,13 @@ final class LibraryModel {
                 if exists, isDirectory.boolValue {
                     scanned.append(contentsOf: try await scanner.scan(url))
                 } else if let container = ContainerFormat(pathExtension: url.pathExtension) {
-                    scanned.append(MediaItem(url: url, kind: self.kind, container: container))
+                    scanned.append(MediaItem(url: url, kind: Self.detectKind(url: url, defaultKind: self.kind), container: container))
                 }
             }
-            // Files land in the tab the user was looking at; the container's
-            // default kind cannot tell an audiobook m4a from a music one.
-            for index in scanned.indices { scanned[index].kind = self.kind }
+            // Smart auto-classifier: assign kind based on format and naming heuristics.
+            for index in scanned.indices {
+                scanned[index].kind = Self.detectKind(url: scanned[index].url, defaultKind: self.kind)
+            }
 
             // add, never load: load resets the saved baseline and would mark
             // every pending edit as already written.
@@ -157,18 +173,39 @@ final class LibraryModel {
         }
     }
 
+    /// Auto-detects media kind from file extension and filename patterns.
+    private static func detectKind(url: URL, defaultKind: MediaKind) -> MediaKind {
+        let ext = url.pathExtension.lowercased()
+        if ext == "m4b" { return .audiobook }
+        if ext == "epub" || ext == "pdf" { return .book }
+        let name = url.lastPathComponent
+        if (ext == "mkv" || ext == "mp4" || ext == "mov" || ext == "m4v") {
+            if name.range(of: #"[Ss]\d+[Ee]\d+|\d+x\d+"#, options: .regularExpression) != nil {
+                return .tvEpisode
+            }
+            if defaultKind == .tvEpisode || defaultKind == .movie { return defaultKind }
+            return .movie
+        }
+        return defaultKind
+    }
+
+    func setKind(_ newKind: MediaKind) async {
+        let urls = Array(selection)
+        guard !urls.isEmpty else { return }
+        await engine.setKind(newKind, to: urls)
+        await refresh()
+    }
+
     func edit(_ edit: TagEdit) async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
         await engine.apply(edit, to: urls)
         await refresh()
     }
-    
+
     func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?) async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
-        // Audible serves covers well past poster size; resample before one lands
-        // in each of a book's parts.
         let sized = artwork.compactMap { CoverImage.artwork(from: $0.data, role: $0.role) }
         await engine.applySnapshot(tags: tags, artwork: sized, chapters: chapters, to: urls)
         await refresh()
@@ -183,9 +220,7 @@ final class LibraryModel {
         await refresh()
     }
 
-    /// Reads a dropped or chosen image file. Anything ImageIO cannot decode is
-    /// refused here rather than written into the library as a bad atom, and
-    /// anything poster-sized is resampled before it lands in every file.
+    /// Reads a dropped or chosen image file, preserving original quality by default.
     func setArtwork(fromFile url: URL) async {
         guard let data = try? Data(contentsOf: url),
               let artwork = CoverImage.artwork(from: data) else {
@@ -193,9 +228,43 @@ final class LibraryModel {
             return
         }
         await setArtwork([artwork])
-        if artwork.data.count < data.count {
-            status = "Cover resampled to \(CoverImage.maxPixels) px (\(data.count.formatted(.byteCount(style: .file))) → \(artwork.data.count.formatted(.byteCount(style: .file))))"
+        status = "Cover set from \(url.lastPathComponent) (\(data.count.formatted(.byteCount(style: .file))))"
+    }
+
+    /// Searches the media item's directory for local artwork (cover.jpg, folder.jpg, etc.).
+    func findLocalArtwork() async {
+        guard let item = selectedItems.first else { return }
+        let dir = item.url.deletingLastPathComponent()
+        let stem = item.url.deletingPathExtension().lastPathComponent
+        let candidates = [
+            "cover.jpg", "cover.png", "cover.jpeg",
+            "folder.jpg", "folder.png", "albumart.jpg",
+            "\(stem).jpg", "\(stem).png", "\(stem).jpeg"
+        ]
+        for name in candidates {
+            let candidateURL = dir.appending(path: name)
+            if FileManager.default.fileExists(atPath: candidateURL.path) {
+                await setArtwork(fromFile: candidateURL)
+                return
+            }
         }
+        status = "No cover image found in \(dir.lastPathComponent)"
+    }
+
+    /// Pastes an image directly from the system clipboard.
+    func pasteArtwork() async {
+        let pasteboard = NSPasteboard.general
+        guard let image = NSImage(pasteboard: pasteboard),
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let data = bitmap.representation(using: .jpeg, properties: [:]) ?? bitmap.representation(using: .png, properties: [:]),
+              let artwork = CoverImage.artwork(from: data)
+        else {
+            status = "No image on clipboard"
+            return
+        }
+        await setArtwork([artwork])
+        status = "Cover pasted from clipboard (\(data.count.formatted(.byteCount(style: .file))))"
     }
 
     func pickArtwork() {
@@ -204,6 +273,75 @@ final class LibraryModel {
         panel.prompt = "Set Cover"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await setArtwork(fromFile: url) }
+    }
+
+    // MARK: - Chapter Editing in Main UI
+
+    func applyChapters(_ chapters: [Chapter]) async {
+        let urls = Array(selection)
+        guard !urls.isEmpty else { return }
+        await engine.applyChapters(chapters, to: urls)
+        await refresh()
+    }
+
+    func addChapter(at time: TimeInterval, title: String? = nil) async {
+        guard let item = selectedItems.first else { return }
+        var chapters = item.chapters
+        let nextIndex = chapters.count
+        let newTitle = title ?? "Chapter \(nextIndex + 1)"
+        chapters.append(Chapter(index: nextIndex, start: time, title: newTitle))
+        chapters.sort { $0.start < $1.start }
+        for i in chapters.indices { chapters[i].index = i }
+        await applyChapters(chapters)
+    }
+
+    func updateChapter(index: Int, title: String, start: TimeInterval) async {
+        guard let item = selectedItems.first, index < item.chapters.count else { return }
+        var chapters = item.chapters
+        chapters[index].title = title
+        chapters[index].start = max(0, start)
+        chapters.sort { $0.start < $1.start }
+        for i in chapters.indices { chapters[i].index = i }
+        await applyChapters(chapters)
+    }
+
+    func removeChapter(at index: Int) async {
+        guard let item = selectedItems.first, index < item.chapters.count else { return }
+        var chapters = item.chapters
+        chapters.remove(at: index)
+        for i in chapters.indices { chapters[i].index = i }
+        await applyChapters(chapters)
+    }
+
+    // MARK: - Filenames
+
+    /// Renames files on disk and follows them: the selection, the working set,
+    /// and the undo history all move to the new URLs. Unlike a tag edit this is
+    /// not deferred to a save — there is no such thing as a half-renamed file.
+    func rename(_ moves: [RenameMove]) async {
+        guard !moves.isEmpty else { return }
+        let outcome = await engine.rename(moves)
+        let table = Dictionary(moves.map { ($0.from, $0.to) }, uniquingKeysWith: { _, last in last })
+        selection = Set(selection.map { table[$0] ?? $0 })
+        // The player holds a URL that no longer exists; reloading it keeps the
+        // transport bar pointing at the file the user can still see.
+        if let playing = player.currentURL, let moved = table[playing] {
+            player.stop()
+            player.load(url: moved)
+        }
+        await refresh()
+        status = outcome.failures.isEmpty
+            ? "Renamed \(outcome.renamed) file\(outcome.renamed == 1 ? "" : "s")"
+            : "Renamed \(outcome.renamed), \(outcome.failures.count) failed — \(outcome.failures.first?.error.localizedDescription ?? "")"
+    }
+
+    /// Writes what the filename parser read, one delta per file, as a single
+    /// undoable batch. Held in memory like any other edit until the user saves.
+    func applyParsedTags(_ deltas: [URL: TagSet]) async {
+        guard !deltas.isEmpty else { return }
+        await engine.applyTagDeltas(deltas)
+        await refresh()
+        status = "Tagged \(deltas.count) file\(deltas.count == 1 ? "" : "s") from their names — not yet saved"
     }
 
     /// Edits among the selection that are not yet on disk. Removal cannot be
@@ -245,15 +383,22 @@ final class LibraryModel {
     func undo() async { await engine.undo(); await refresh() }
     func redo() async { await engine.redo(); await refresh() }
 
-    func save() async {
-        let count = dirtyCount
+    func saveSelected() async {
+        let selectedDirty = dirtyURLs.intersection(selection)
+        guard !selectedDirty.isEmpty else { return }
+        await save(only: selectedDirty)
+    }
+
+    func save(only selection: Set<URL>? = nil) async {
+        let pending = selection != nil ? dirtyURLs.intersection(selection!) : dirtyURLs
+        let count = pending.count
         guard count > 0 else { return }
         failures = []
         saveProgress = (0, count)
         status = "Saving \(count) file\(count == 1 ? "" : "s")…"
         defer { saveProgress = nil }
         do {
-            let written = try await engine.save { [weak self] _, done, total in
+            let written = try await engine.save(only: selection) { [weak self] _, done, total in
                 Task { @MainActor in self?.saveProgress = (done, total) }
             }
             failures = written

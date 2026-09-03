@@ -13,10 +13,9 @@ several parsers, unjustified while AVFoundation covers most containers.
 
 ## No third-party dependencies
 
-Zero today. Every parser so far (MPEG-4 via AVFoundation, EBML by hand) has been
-cheaper than the integration cost of a library. ID3v2.4 writing is the next test
-of this line and the decision is to hand-roll it — the spec is stable and we need
-frame-level control to keep round-trips lossless. Adding a dependency is allowed;
+Zero today. Every parser and writer (MPEG-4 via AVFoundation, EBML and ID3v2.4
+by hand, EPUB via custom `ZipArchive`, PDF via PDFKit) has been cheaper and
+cleaner than the integration cost of a library. Adding a dependency is allowed;
 doing it silently is not.
 
 ## Not Combine
@@ -30,7 +29,8 @@ Temp file in the same directory → re-read it to prove it is playable → atomi
 `replaceItemAt` → previous tags archived as JSON in Application Support. Slower
 and more code than writing in place, deliberately. This is the one place where
 the paranoid version is the correct version: the alternative is a truncated
-media file the user cannot get back.
+media file the user cannot get back. (Matroska is the deliberate exception:
+in-place element rewrite outside Clusters avoids rewriting multi-gigabyte film files).
 
 ## Lossless round-trips are an invariant, not a nice-to-have
 

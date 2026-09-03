@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-31. Update this file in the same commit as any change it
+Last updated: 2026-09-02. Update this file in the same commit as any change it
 describes — a stale STATUS is worse than none, because the next session trusts it.
 
 ## Works today
@@ -8,19 +8,22 @@ describes — a stale STATUS is worse than none, because the next session trusts
 | Area | State |
 |---|---|
 | Domain model | `MediaCore`: `MediaItem`, `TagSet`, `TagKey`, `Chapter`, `Artwork`. Foundation only. |
-| Scanning | `LibraryScanner`: recursive walk, extension-typed, hidden files and packages skipped. |
+| Scanning | `LibraryScanner`: recursive walk, extension-typed, smart kind classifier (.m4b → audiobook, epub/pdf → book, SxxExx → TV), hidden files skipped. |
 | Reading | `MediaTagReader` routes by container: AVFoundation for MPEG-4/mp3/wav/aiff, `MatroskaReader` for mkv, `EPUBReader` for epub, `PDFReader` for pdf. |
 | Writing | `MediaTagWriter` routes: `MPEG4TagWriter` (MP4 family), `ID3TagWriter` (mp3), `MatroskaTagWriter` (mkv), `EPUBTagWriter` (epub), `PDFTagWriter` (pdf). |
 | ID3 | Read **and** write. Writes v2.4/UTF-8, preserves unmanaged frames, `3/12` split. |
 | MPEG-4 | Read **and** write. Standard atoms (`©nam`, `tvsh`, `trkn`…) plus freeform `----` for SERIES/ASIN/STUDIO. |
 | Matroska | Read **and** write. Tags written by in-place patch — the file is never copied. |
-| Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Not editable yet. |
+| Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Editable in-place in Inspector and in Metadata Wizard. |
+| Playback | Audio preview via `AVPlayer` (m4b, m4a, mp3, wav, aiff, flac) with scrubber and playhead chapter insertion. |
+| Artwork | Original image resolution preserved by default; local artwork auto-discovery (`cover.jpg`) and clipboard paste (`⌘V`). |
 | Writing safety | Stage to sibling temp → re-read to verify → atomic `replaceItemAt`. Previous tags archived as JSON. |
-| Editing | `EditEngine`: batch `set`/`clear`/`replace` over a selection, undo/redo per batch, save only dirty files. `applySnapshot` writes the wizard's result as a **delta**, so per-file tags survive a batch. |
-| UI | Three panes: kind sidebar; sortable, column-customisable table with covers and per-row unsaved marks; batch inspector with per-kind fields, an artwork well and the chapter list. |
+| Editing | `EditEngine`: batch `set`/`clear`/`replace`/`setKind`/`applyChapters` over a selection, undo/redo per batch, save only dirty files. `applySnapshot` writes the wizard's result as a **delta**. |
+| UI | Three panes: kind sidebar with drop-reassignment; sortable, column-customisable table with covers and unsaved marks; batch inspector with in-place chapter studio and audio transport bar. |
 | Books | EPUB read **and** write via a hand-rolled `ZipArchive`; OPF edited surgically, other entries copied compressed. PDF read and write via PDFKit. See `BOOKS.md`. |
 | Metadata providers | `MetadataProvider` protocol. Audible + Audnexus for audiobooks, OpenLibrary for books. The wizard is provider-driven and serves both tabs. |
-| Tests | 208, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
+| Filenames | `FilenamePattern` renders tags into a name and parses a name back into tags. Rename sheet with live preview, presets, collision and missing-field refusals; renames are undoable. See `FILENAMES.md`. |
+| Tests | 242, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
 
 ## Does not work yet
 
@@ -32,18 +35,15 @@ describes — a stale STATUS is worse than none, because the next session trusts
   Encrypted and digitally-signed PDFs are refused on write.
 - **mkv chapters and attachments are read-only.** Only the `Tags` element is
   written; editing chapters means the same patch machinery applied to `Chapters`.
-- **Chapter editing.** Writable for MPEG-4 files (via remuxing). Read-only for
-  mkv. The wizard only writes chapters when exactly one file is selected — one
-  book's chapter list does not belong in each of its twenty part files.
 - **Metadata providers.** Audiobooks (Audible + Audnexus) and books
   (OpenLibrary) done. TMDB, TVmaze, iTunes and MusicBrainz not started — the
   wizard button is disabled on tabs no provider serves.
 - **Artwork beyond one cover.** One `.cover` image per file: drop, choose,
-  remove, resampled to 1400 px on import. Backdrops and multiple roles are
+  find in folder, paste, remove. Backdrops and multiple roles are
   modelled but not editable.
-- **Filename ↔ tag conversion.** Not started.
-- **Chapter editing outside the wizard.** The inspector lists chapters read-only
-  and sends you to the wizard to change them.
+- **Filename patterns name a file, not a path.** `%artist%/%album%/%title%`
+  will not move a file into folders; `/` is sanitised to `-`. Batch rename
+  cannot create directories.
 - **Library persistence.** Nothing is remembered between launches; you re-add the folder each time.
 
 `MediaTagReader.canRead` / `canWrite` is the machine-readable version of this
@@ -63,11 +63,10 @@ step.
 
 - Tag reading is serial, one file at a time (`ponytail:` marked in `App.swift`).
   Fine for hundreds of files, visible at thousands.
-- Imported files take the kind of the tab they were dropped into, because a
-  container cannot distinguish an audiobook `.m4a` from a music one. Moving a
-  file between tabs afterwards is not possible yet.
-- `MediaItem.id` is the URL, so a file moved outside the app loses its identity
-  (`ponytail:` marked in `MediaItem.swift`).
+- `MediaItem.id` is the URL, so a file moved *outside* the app loses its
+  identity (`ponytail:` marked in `MediaItem.swift`). A rename made *inside* the
+  app is fine: `EditEngine.rename` re-keys the working set, the baseline and
+  both history stacks.
 - Audible m4b files carry a multi-kilobyte base64 `JSON` atom. It round-trips
   correctly but is ugly if ever surfaced raw in the UI.
 - `.m4b` is written as `AVFileType.m4a`; AVFoundation has no separate m4b type.
@@ -90,7 +89,7 @@ step.
 ## Verify the claims above
 
 ```sh
-make test                                   # 208 tests
+make test                                   # 242 tests
 OMNITAG_REAL_MEDIA=~/Desktop/tp make test   # plus real-file assertions
 OMNITAG_LIVE=1 make test                    # plus live Audible/Audnexus checks
 make xctest                                 # same suite through the Xcode scheme

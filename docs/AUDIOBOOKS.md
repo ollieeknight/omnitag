@@ -72,8 +72,8 @@ Editing them is the open design question; the plan:
   side or a hand-typed title. Times come from the provider or stay as they are —
   retiming audio is not something a tagger should guess at.
 - **Bulk tools** worth having, because 85-chapter audiobooks are normal:
-  a rename pattern (`Chapter %n%`, `%title%`), a "keep my titles, take their
-  times" toggle, and shift-all-times for an offset intro.
+  a rename pattern (`Chapter %n%`, `%title%`), and a "keep my titles, take their
+  times" toggle.
 - **Writing m4b chapters** is the hard part. AVFoundation cannot patch a chapter
   track in place; it writes chapters by building a new text track, which means
   `AVAssetWriter` and a full remux of a several-hundred-megabyte file. Options:
@@ -99,10 +99,43 @@ in the other tabs, and hideable by right-clicking the header), a cover thumbnail
 and an orange dot on any file whose edits are not yet on disk. ⌘L opens the
 wizard on the selection; ⌘R reveals it in the Finder.
 
-The inspector's cover well takes a dropped image and resamples anything over
-1400 px (`CoverImage`) — the same treatment Audible's own covers get on the way
-in, because a 3000 px poster written into each of a book's thirty parts is how a
-library balloons.
+### Audio player and playback
+
+A docked mini-transport bar appears whenever an audio file is selected. Built on
+`AVPlayer`, it provides instant playback of `.m4b`, `.m4a`, `.mp3`, `.wav`,
+`.aiff`, and `.flac`. Features:
+- Spacebar toggle for Play/Pause.
+- Continuous scrub slider with 100ms periodic time updates.
+- 15-second jump backward (`⌘←`) and forward (`⌘→`).
+- "Add Marker" / "Add at Playhead" button to insert a chapter mark at the current
+  audio timestamp.
+
+### Chapter editing in the main UI
+
+In addition to the Metadata Wizard's side-by-side reconciliation, the Inspector
+contains a live Chapter Studio for single audio selections:
+- Editable title text fields.
+- Clickable timecodes that seek the player directly to chapter boundaries.
+- Individual chapter deletion (`-`).
+- "Add at Playhead" (`+`) button.
+
+### Artwork handling
+
+- **Full original resolution preserved**: Cover images are preserved at their
+  original resolution and byte size by default.
+- **Local discovery**: "Find in Folder" scans the media item's directory for
+  `cover.jpg`, `folder.jpg`, `cover.png`, or same-stem images.
+- **Clipboard paste**: Paste image directly with `⌘V` or the inspector menu.
+- **Drag and drop**: Drop an image directly onto the artwork well.
+
+### Media kind triage
+
+Files are automatically classified by extension on import (`.m4b` lands in
+Audiobooks, `.epub`/`.pdf` in Books, `SxxExx` in TV Shows). If an item is
+misclassified, you can reassign it by:
+- Dragging and dropping rows onto sidebar tabs.
+- Right-clicking rows → **Set Kind** → select destination kind.
+- Changing the **Kind** picker in the inspector.
 
 ## What the wizard actually does
 
@@ -110,34 +143,27 @@ Four steps, and the chapters one disappears when there is nothing to reconcile
 (no provider chapters, or more than one file selected).
 
 - **Tags are written as a delta.** Only the ticked rows go to `EditEngine`,
-  merged into each file's own tags. Selecting twenty parts of one book and
-  taking the author no longer flattens their per-file titles and track numbers.
-  A row edited down to blank is skipped, not written empty — there is no
-  "clear" action in the wizard, and an empty tag is not one.
+  merged into each file's own tags.
 - **The three spec'd actions are tick-presets**, not separate commit paths:
   *Fill empty* ticks only the fields the file lacks, *Take all* ticks everything
   Audible answered, *None* clears the ticks. The row is always the truth.
 - **The chapter strategy rewrites the rows**, so the table previews exactly what
-  will be written. It used to be applied after the fact, which silently threw
-  away any title the user had hand-typed.
+  will be written.
 - **A pasted ASIN or Audible link is a lookup, not a search.** The field detects
   a `B…` identifier in whatever is pasted, shows an ASIN badge, and queries the
-  product endpoint directly — the keyword index cannot reach every book it sells.
-- **Bulk chapter tools.** Retitle all with `Chapter %n%` / `%n%. %title%`, or
-  shift every start time, for the intro the provider did not account for. An
-  85-chapter book is not retyped by hand.
+  product endpoint directly.
+- **Bulk chapter tools.** Retitle all with `Chapter %n%` / `%n%. %title%`.
 - **Artwork failure is not tag failure.** A cover that will not download is
-  reported in the bar; the tags the user just reviewed are still applied. Empty
-  artwork never erases an existing cover.
+  reported in the bar; the tags the user just reviewed are still applied.
 
 ## Status
 
 Done: `MetadataAPI` module — `AudibleClient`, `AudnexusClient`,
 `AudiobookMetadataService`, region fallback, search ladder, ranking, ASIN/URL
 parsing, offline fixtures, live opt-in tests. **MPEG-4 chapter writing** via
-`MPEG4ChapterWriter`. **The wizard UI**: search (grid/list, region switch,
-empty vs error states), tag diff with per-row edit and revert, chapter diff with
-live strategy preview, summary, and artwork download to `covr`/`APIC`.
+`MPEG4ChapterWriter`. **The wizard UI**: search, tag diff, chapter diff, and
+summary. **Audio playback**: native `AVPlayer` transport bar. **In-place chapter
+editing**: full inspector studio. **Kind triage**: drag-and-drop and context menu
+reassignment.
 
-Next: mkv chapter editing, chapter editing without going through the wizard, and
-library persistence between launches.
+Next: mkv chapter editing and library persistence between launches.
