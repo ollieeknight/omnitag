@@ -17,13 +17,33 @@ public protocol MetadataProvider: Sendable {
     /// differ enough per service that a generic string would mislead.
     var searchHint: String { get }
 
-    func search(_ query: MetadataQuery, limit: Int) async throws -> [MetadataCandidate]
-    func details(for candidate: MetadataCandidate) async throws -> MetadataDetails
+    /// `kind` matters only to a provider serving more than one — TMDB routes
+    /// `/search/movie` vs `/search/tv` by it. A single-kind provider ignores
+    /// it via the default overload below.
+    func search(_ query: MetadataQuery, kind: MediaKind, limit: Int) async throws -> [MetadataCandidate]
+    func details(for candidate: MetadataCandidate, kind: MediaKind) async throws -> MetadataDetails
+
+    /// True when a search candidate from this provider names a group (a TV
+    /// show) rather than the exact thing that gets tagged (an episode) — the
+    /// wizard needs an extra picker step before it has anything to diff. Only
+    /// TMDB's TV half needs this; everything else defaults to `false`. A
+    /// property rather than `provider is TMDBProvider` so the wizard's
+    /// routing decision is testable against a fake provider, not tied to one
+    /// concrete type.
+    var hasEpisodePicker: Bool { get }
 }
 
 public extension MetadataProvider {
-    func search(_ query: MetadataQuery) async throws -> [MetadataCandidate] {
-        try await search(query, limit: 20)
+    func search(_ query: MetadataQuery, limit: Int) async throws -> [MetadataCandidate] {
+        try await search(query, kind: kinds.first ?? .movie, limit: limit)
+    }
+
+    func details(for candidate: MetadataCandidate) async throws -> MetadataDetails {
+        try await details(for: candidate, kind: kinds.first ?? .movie)
+    }
+
+    var hasEpisodePicker: Bool {
+        false
     }
 }
 
@@ -36,20 +56,31 @@ public struct AudibleMetadataProvider: MetadataProvider {
 
     public init(region: AudibleRegion = .unitedKingdom, transport: (any HTTPTransporting)? = nil) {
         self.region = region
-        self.service = transport.map { AudibleProvider(region: region, transport: $0) }
+        service = transport.map { AudibleProvider(region: region, transport: $0) }
             ?? AudibleProvider(region: region)
     }
 
-    public var id: String { "audible.\(region.rawValue)" }
-    public var name: String { "Audible \(region.rawValue.uppercased())" }
-    public var kinds: Set<MediaKind> { [.audiobook] }
-    public var searchHint: String { "Title, author, ASIN or Audible link" }
+    public var id: String {
+        "audible.\(region.rawValue)"
+    }
 
-    public func search(_ query: MetadataQuery, limit: Int) async throws -> [MetadataCandidate] {
+    public var name: String {
+        "Audible \(region.rawValue.uppercased())"
+    }
+
+    public var kinds: Set<MediaKind> {
+        [.audiobook]
+    }
+
+    public var searchHint: String {
+        "Title, author, ASIN or Audible link"
+    }
+
+    public func search(_ query: MetadataQuery, kind: MediaKind, limit: Int) async throws -> [MetadataCandidate] {
         try await service.search(query, limit: limit)
     }
 
-    public func details(for candidate: MetadataCandidate) async throws -> MetadataDetails {
+    public func details(for candidate: MetadataCandidate, kind: MediaKind) async throws -> MetadataDetails {
         try await service.details(for: candidate.id)
     }
 }
@@ -60,33 +91,41 @@ public struct OpenLibraryProvider: MetadataProvider {
     private let client: OpenLibraryClient
 
     public init(transport: (any HTTPTransporting)? = nil) {
-        self.client = transport.map { OpenLibraryClient(transport: $0) } ?? OpenLibraryClient()
+        client = transport.map { OpenLibraryClient(transport: $0) } ?? OpenLibraryClient()
     }
 
-    public var id: String { "openlibrary" }
-    public var name: String { "OpenLibrary" }
-    public var kinds: Set<MediaKind> { [.book] }
-    public var searchHint: String { "Title, author or ISBN" }
+    public var id: String {
+        "openlibrary"
+    }
 
-    public func search(_ query: MetadataQuery, limit: Int) async throws -> [MetadataCandidate] {
+    public var name: String {
+        "OpenLibrary"
+    }
+
+    public var kinds: Set<MediaKind> {
+        [.book]
+    }
+
+    public var searchHint: String {
+        "Title, author or ISBN"
+    }
+
+    public func search(_ query: MetadataQuery, kind: MediaKind, limit: Int) async throws -> [MetadataCandidate] {
         try await client.search(query, limit: limit)
     }
 
-    public func details(for candidate: MetadataCandidate) async throws -> MetadataDetails {
+    public func details(for candidate: MetadataCandidate, kind: MediaKind) async throws -> MetadataDetails {
         // OpenLibrary's search response already carries everything the tag diff
         // needs, so a second round trip would buy nothing. Books have no
         // chapters here: an EPUB's table of contents is the file's own.
-        MetadataDetails(book: try await client.book(key: candidate.id), chapters: [])
+        try await MetadataDetails(book: client.book(key: candidate.id), chapters: [])
     }
 }
 
 /// Every provider the app knows about, in the order the wizard offers them.
 public enum MetadataProviders {
-    public static func all(region: AudibleRegion = .unitedKingdom) -> [any MetadataProvider] {
-        [AudibleMetadataProvider(region: region), OpenLibraryProvider()]
-    }
-
     public static func serving(_ kind: MediaKind, region: AudibleRegion = .unitedKingdom) -> [any MetadataProvider] {
-        all(region: region).filter { $0.kinds.contains(kind) }
+        [AudibleMetadataProvider(region: region), OpenLibraryProvider(), TMDBProvider()]
+            .filter { $0.kinds.contains(kind) }
     }
 }
