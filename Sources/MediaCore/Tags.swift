@@ -1,10 +1,10 @@
 public enum TagKey: Sendable, Hashable, Codable {
     case title, artist, albumArtist, album, genre, year, trackNumber, trackTotal
     case discNumber, discTotal, comment, composer, grouping, compilation
-    case author, narrator, series, seriesIndex, publisher, isbn, asin      // audiobook
-    case language, subtitle                                                // books
+    case author, narrator, series, seriesIndex, publisher, isbn, asin // audiobook
+    case language, subtitle // books
     case showName, seasonNumber, episodeNumber, episodeTitle, director,
-         studio, contentRating, synopsis                                    // video
+         studio, contentRating, synopsis, tmdbID // video
     /// Anything a format carries that we do not model. Kept so a round-trip
     /// never silently destroys a frame the user cared about.
     case custom(String)
@@ -12,27 +12,27 @@ public enum TagKey: Sendable, Hashable, Codable {
     public static func standardFields(for kind: MediaKind) -> [(key: TagKey, label: String)] {
         switch kind {
         case .music:
-            return [(.title, "Title"), (.artist, "Artist"), (.albumArtist, "Album Artist"),
+            [(.title, "Title"), (.artist, "Artist"), (.albumArtist, "Album Artist"),
              (.album, "Album"), (.genre, "Genre"), (.year, "Year"),
              (.trackNumber, "Track"), (.trackTotal, "of"), (.composer, "Composer")]
         case .audiobook:
-            return [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
+            [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
              (.narrator, "Narrator"), (.series, "Series"), (.seriesIndex, "Book #"),
              (.publisher, "Publisher"), (.year, "Year"), (.genre, "Genre"),
-             (.asin, "ASIN"), (.synopsis, "Summary")]
+             (.isbn, "ISBN"), (.asin, "ASIN"), (.synopsis, "Summary")]
         case .book:
-            return [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
+            [(.title, "Title"), (.subtitle, "Subtitle"), (.author, "Author"),
              (.series, "Series"), (.seriesIndex, "Book #"), (.publisher, "Publisher"),
              (.year, "Year"), (.genre, "Subjects"), (.language, "Language"),
              (.isbn, "ISBN"), (.synopsis, "Description")]
         case .movie:
-            return [(.title, "Title"), (.year, "Year"), (.director, "Director"),
+            [(.title, "Title"), (.year, "Year"), (.director, "Director"),
              (.studio, "Studio"), (.genre, "Genre"), (.contentRating, "Rating"),
-             (.synopsis, "Synopsis")]
+             (.synopsis, "Synopsis"), (.tmdbID, "TMDB ID")]
         case .tvEpisode:
-            return [(.showName, "Show"), (.seasonNumber, "Season"), (.episodeNumber, "Episode"),
+            [(.showName, "Show"), (.seasonNumber, "Season"), (.episodeNumber, "Episode"),
              (.episodeTitle, "Episode Title"), (.year, "Year"), (.director, "Director"),
-             (.genre, "Genre")]
+             (.genre, "Genre"), (.tmdbID, "TMDB ID")]
         }
     }
 }
@@ -43,15 +43,15 @@ public enum TagValue: Sendable, Hashable, Codable {
 
     public var stringValue: String? {
         switch self {
-        case .string(let s): s
-        case .number(let n): String(n)
+        case let .string(s): s
+        case let .number(n): String(n)
         }
     }
 
     public var intValue: Int? {
         switch self {
-        case .string(let s): Int(s)
-        case .number(let n): n
+        case let .string(s): Int(s)
+        case let .number(n): n
         }
     }
 }
@@ -59,7 +59,9 @@ public enum TagValue: Sendable, Hashable, Codable {
 public struct TagSet: Sendable, Hashable, Codable {
     public private(set) var values: [TagKey: TagValue]
 
-    public init(_ values: [TagKey: TagValue] = [:]) { self.values = values }
+    public init(_ values: [TagKey: TagValue] = [:]) {
+        self.values = values
+    }
 
     public subscript(key: TagKey) -> TagValue? {
         get { values[key] }
@@ -81,19 +83,40 @@ public struct TagSet: Sendable, Hashable, Codable {
     }
 }
 
-extension TagSet {
-    private func string(_ key: TagKey) -> String? { values[key]?.stringValue }
+public extension TagSet {
+    private func string(_ key: TagKey) -> String? {
+        values[key]?.stringValue
+    }
+
     private mutating func set(_ key: TagKey, _ value: String?) {
         values[key] = value.map { .string($0) }
     }
 
-    public var title: String? { get { string(.title) } set { set(.title, newValue) } }
-    public var artist: String? { get { string(.artist) } set { set(.artist, newValue) } }
-    public var album: String? { get { string(.album) } set { set(.album, newValue) } }
-    public var genre: String? { get { string(.genre) } set { set(.genre, newValue) } }
-    public var author: String? { get { string(.author) } set { set(.author, newValue) } }
-    public var showName: String? { get { string(.showName) } set { set(.showName, newValue) } }
-    public var year: Int? {
+    var title: String? {
+        get { string(.title) } set { set(.title, newValue) }
+    }
+
+    var artist: String? {
+        get { string(.artist) } set { set(.artist, newValue) }
+    }
+
+    var album: String? {
+        get { string(.album) } set { set(.album, newValue) }
+    }
+
+    var genre: String? {
+        get { string(.genre) } set { set(.genre, newValue) }
+    }
+
+    var author: String? {
+        get { string(.author) } set { set(.author, newValue) }
+    }
+
+    var showName: String? {
+        get { string(.showName) } set { set(.showName, newValue) }
+    }
+
+    var year: Int? {
         get { values[.year]?.intValue }
         set { values[.year] = newValue.map { .number($0) } }
     }
