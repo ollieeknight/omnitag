@@ -15,34 +15,44 @@ struct LibraryView: View {
     var body: some View {
         NavigationSplitView {
             List(MediaKind.allCases, id: \.self, selection: $model.kind) { kind in
-                Label(kind.title, systemImage: kind.symbol)
-                    .tag(kind)
-                    .dropDestination(for: URL.self) { urls, _ in
-                        Task { await model.setKind(kind) }
-                        return true
+                HStack {
+                    Label(kind.title, systemImage: kind.symbol)
+                    Spacer()
+                    let count = model.count(for: kind)
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
+                }
+                .tag(kind)
+                .dropDestination(for: URL.self) { urls, _ in
+                    model.selection = Set(urls)
+                    Task { await model.setKind(kind) }
+                    return true
+                }
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
-            Group {
-                if model.visible.isEmpty {
-                    emptyState
-                } else {
-                    table
-                }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if model.player.duration > 0 || model.player.currentURL != nil {
-                        Divider()
-                        playerBar
-                    }
-                    if shouldShowStatusBar {
-                        Divider()
-                        statusBar
+            VStack(spacing: 0) {
+                Group {
+                    if model.visible.isEmpty {
+                        emptyState
+                    } else {
+                        table
                     }
                 }
-                .background(.bar)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if model.player.duration > 0 || model.player.currentURL != nil {
+                    Divider()
+                    playerBar
+                }
+                if shouldShowStatusBar {
+                    Divider()
+                    statusBar
+                }
             }
             .navigationTitle(model.kind.title)
             .navigationSubtitle(subtitle)
@@ -53,7 +63,11 @@ struct LibraryView: View {
             }
             .confirmationDialog(
                 "Discard unsaved changes to ^[\(pendingRemoval ?? 0) file](inflect: true)?",
-                isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+                isPresented: Binding(get: { pendingRemoval != nil }, set: {
+                    if !$0 {
+                        pendingRemoval = nil
+                    }
+                }),
                 titleVisibility: .visible
             ) {
                 Button("Remove Anyway", role: .destructive) {
@@ -65,8 +79,8 @@ struct LibraryView: View {
                 Text("Removing them discards those edits. The files on disk are not touched, and this cannot be undone.")
             }
             .sheet(isPresented: $model.showWizard) {
-                MetadataWizardView(items: model.selectedItems, kind: model.kind) { tags, artwork, chapters in
-                    await model.applyWizardSnapshot(tags: tags, artwork: artwork, chapters: chapters)
+                MetadataWizardView(items: model.selectedItems, kind: model.kind) { tags, artwork, chapters, clearing in
+                    await model.applyWizardSnapshot(tags: tags, artwork: artwork, chapters: chapters, clearing: clearing)
                 }
                 // The wizard's state is seeded from the selection at init, so a
                 // new selection has to be a new view, not a reused one.
@@ -76,7 +90,8 @@ struct LibraryView: View {
                 RenameSheet(
                     items: model.selectedItems, kind: model.kind,
                     rename: { await model.rename($0) },
-                    applyTags: { await model.applyParsedTags($0) })
+                    applyTags: { await model.applyParsedTags($0) }
+                )
                 // Same rule as the wizard: the preview is seeded from the
                 // selection, so a new selection has to be a new view.
                 .id(model.selection)
@@ -101,7 +116,9 @@ struct LibraryView: View {
 
     private var subtitle: String {
         let shown = model.visible.count
-        if model.dirtyCount > 0 { return "\(shown) shown · \(model.dirtyCount) unsaved" }
+        if model.dirtyCount > 0 {
+            return "\(shown) shown · \(model.dirtyCount) unsaved"
+        }
         return shown == 1 ? "1 file" : "\(shown) files"
     }
 
@@ -224,14 +241,11 @@ struct LibraryView: View {
         }
     }
 
-    /// ponytail: decodes on every cell redraw. Cache by URL if a library big
-    /// enough to make scrolling stutter ever turns up.
     @ViewBuilder
     private func coverThumbnail(_ item: MediaItem) -> some View {
-        if let data = item.artwork.first?.data, let image = NSImage(data: data) {
+        if let image = model.thumbnails.image(for: item) {
             Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+                .resizable().scaledToFill()
                 .frame(width: 20, height: 20)
                 .clipShape(.rect(cornerRadius: 3))
                 .accessibilityHidden(true)
@@ -285,7 +299,8 @@ struct LibraryView: View {
             } label: {
                 Label(
                     selection.count == 1 ? "Remove from Library" : "Remove \(selection.count) from Library",
-                    systemImage: "minus.circle")
+                    systemImage: "minus.circle"
+                )
             }
         }
     }
@@ -296,8 +311,8 @@ struct LibraryView: View {
                   systemImage: model.items.isEmpty ? model.kind.symbol : "magnifyingglass")
         } description: {
             Text(model.items.isEmpty
-                 ? "Drag a folder or media files here, or use Import."
-                 : "No \(model.kind.title.lowercased()) match “\(model.search)”.")
+                ? "Drag a folder or media files here, or use Import."
+                : "No \(model.kind.title.lowercased()) match “\(model.search)”.")
         } actions: {
             if model.items.isEmpty {
                 Button("Add Folder…") { model.pickFolder() }
@@ -338,8 +353,8 @@ struct LibraryView: View {
             .disabled(model.selection.isEmpty || !model.kindHasProvider)
             .keyboardShortcut("l", modifiers: .command)
             .help(model.kindHasProvider
-                  ? "Look up selection online (⌘L)"
-                  : "No metadata provider covers \(model.kind.title) yet")
+                ? "Look up selection online (⌘L)"
+                : "No metadata provider covers \(model.kind.title) yet")
         }
 
         ToolbarSpacer(.fixed)
@@ -350,8 +365,6 @@ struct LibraryView: View {
             }
             .help("Show only files with unsaved changes")
         }
-
-
 
         ToolbarSpacer(.flexible)
 
@@ -420,7 +433,7 @@ struct LibraryView: View {
                 Button {
                     Task { await model.addChapter(at: model.player.currentTime) }
                 } label: {
-                    Label("Add Marker", systemImage: "bookmark.badge.plus")
+                    Label("Add Marker", systemImage: "bookmark")
                         .font(.caption2)
                 }
                 .buttonStyle(.borderless)
@@ -470,7 +483,7 @@ struct LibraryView: View {
     }
 
     static func formatted(_ seconds: TimeInterval) -> String {
-        Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond))
+        AudioPlayerModel.format(seconds)
     }
 }
 
@@ -488,9 +501,10 @@ struct InspectorView: View {
                 if !readOnlySelection.isEmpty {
                     Label(
                         "\(readOnlySelection.count) selected file\(readOnlySelection.count == 1 ? " has" : "s have") no writer yet — edits cannot be saved.",
-                        systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.callout)
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.callout)
                 }
 
                 kindSection
@@ -503,12 +517,12 @@ struct InspectorView: View {
                     }
                 }
 
+                chapterSection
             }
         }
         .formStyle(.grouped)
     }
 
-    @ViewBuilder
     private var emptyInspector: some View {
         VStack(spacing: 12) {
             Spacer()
@@ -541,6 +555,15 @@ struct InspectorView: View {
                 ForEach(MediaKind.allCases, id: \.self) { kind in
                     Label(kind.title, systemImage: kind.symbol).tag(kind)
                 }
+            }
+            // Only makes sense for one file at a time — a multi-selection's
+            // items were classified independently and may have different
+            // reasons, so no single caption could speak for all of them.
+            if let item = model.selectedItems.first, model.selectedItems.count == 1,
+               let reason = LibraryModel.kindGuessReason(url: item.url, kind: item.kind) {
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -589,8 +612,7 @@ struct InspectorView: View {
                 .fill(.quaternary.opacity(0.35))
             if let data = commonArtwork?.data, let image = NSImage(data: data) {
                 Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .clipShape(.rect(cornerRadius: 10))
             } else {
                 VStack(spacing: 6) {
@@ -605,7 +627,8 @@ struct InspectorView: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(
                     isArtworkTargeted ? Color.accentColor : Color.secondary.opacity(0.25),
-                    style: StrokeStyle(lineWidth: isArtworkTargeted ? 3 : 1, dash: commonArtwork == nil ? [6] : []))
+                    style: StrokeStyle(lineWidth: isArtworkTargeted ? 3 : 1, dash: commonArtwork == nil ? [6] : [])
+                )
         }
         .frame(height: 200)
         .frame(maxWidth: .infinity)
@@ -648,7 +671,7 @@ struct InspectorView: View {
     /// The cover the whole selection agrees on, if any.
     private var commonArtwork: Artwork? {
         let covers = model.selectedItems.map(\.artwork.first)
-        guard let first = covers.first ?? nil, covers.allSatisfy({ $0 == first }) else { return nil }
+        guard let first = covers.first, covers.allSatisfy({ $0 == first }) else { return nil }
         return first
     }
 
@@ -660,7 +683,40 @@ struct InspectorView: View {
         bytes.formatted(.byteCount(style: .file))
     }
 
+    // MARK: - Chapters
 
+    /// One file only: chapters belong to a single recording, and the transport
+    /// bar's "Add Marker" needs somewhere to show what it just added.
+    @ViewBuilder
+    private var chapterSection: some View {
+        if let item = singleSelection, !item.chapters.isEmpty {
+            Section("^[\(item.chapters.count) chapter](inflect: true)") {
+                ForEach(Array(item.chapters.enumerated()), id: \.offset) { offset, chapter in
+                    HStack(spacing: 8) {
+                        Button(LibraryView.formatted(chapter.start)) {
+                            model.player.load(url: item.url)
+                            model.player.seek(to: chapter.start)
+                        }
+                        .buttonStyle(.link)
+                        .font(.callout.monospacedDigit())
+                        .help("Play from here")
+
+                        ChapterTitleField(index: offset, title: chapter.title, model: model)
+
+                        Button {
+                            Task { await model.removeChapter(at: offset) }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Remove this chapter")
+                        .accessibilityLabel("Remove chapter \(offset + 1)")
+                    }
+                }
+            }
+        }
+    }
 
     /// Files the user can edit on screen but not save: mkv, flac today.
     private var readOnlySelection: [MediaItem] {
@@ -715,20 +771,35 @@ private struct TagField: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
-    private var shared: String? { model.commonTags[key]?.stringValue }
-    private var isMixed: Bool { shared == nil && model.selection.count > 1 }
+    private var shared: String? {
+        model.commonTags[key]?.stringValue
+    }
+
+    private var isMixed: Bool {
+        shared == nil && model.selection.count > 1
+    }
 
     var body: some View {
         TextField(label, text: $text, prompt: Text(isMixed ? "Multiple values" : label), axis: axis)
-            .lineLimit(key == .synopsis ? 2...8 : 1...1)
+            .lineLimit(key == .synopsis ? 2 ... 8 : 1 ... 1)
             .focused($focused)
             .onSubmit(commit)
-            .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
-            .onChange(of: shared, initial: true) { _, value in if !focused { text = value ?? "" } }
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused {
+                    commit()
+                }
+            }
+            .onChange(of: shared, initial: true) { _, value in
+                if !focused {
+                    text = value ?? ""
+                }
+            }
             .onChange(of: model.selection) { _, _ in text = shared ?? "" }
     }
 
-    private var axis: Axis { key == .synopsis ? .vertical : .horizontal }
+    private var axis: Axis {
+        key == .synopsis ? .vertical : .horizontal
+    }
 
     private func commit() {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
@@ -739,8 +810,43 @@ private struct TagField: View {
     }
 
     private func value(from string: String) -> TagValue {
-        if let number = Int(string), MPEG4NumericKeys.contains(key) { return .number(number) }
+        if let number = Int(string), MPEG4NumericKeys.contains(key) {
+            return .number(number)
+        }
         return .string(string)
+    }
+}
+
+/// One chapter title. Commits on Return or focus loss for the same reason
+/// `TagField` does: a keystroke-level undo stack is no use to anyone.
+private struct ChapterTitleField: View {
+    let index: Int
+    let title: String
+    @Bindable var model: LibraryModel
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Title", text: $text)
+            .focused($focused)
+            .onSubmit(commit)
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused {
+                    commit()
+                }
+            }
+            .onChange(of: title, initial: true) { _, value in
+                if !focused {
+                    text = value
+                }
+            }
+            .accessibilityLabel("Title for chapter \(index + 1)")
+    }
+
+    private func commit() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != title else { return }
+        Task { await model.renameChapter(at: index, to: trimmed) }
     }
 }
 
@@ -748,7 +854,7 @@ private struct TagField: View {
 /// it rather than exported from TagIO — the UI is the only caller.
 private let MPEG4NumericKeys: Set<TagKey> = [
     .year, .trackNumber, .trackTotal, .discNumber, .discTotal,
-    .seriesIndex, .seasonNumber, .episodeNumber,
+    .seriesIndex, .seasonNumber, .episodeNumber
 ]
 
 extension MediaKind {
@@ -761,6 +867,7 @@ extension MediaKind {
         case .tvEpisode: "TV Shows"
         }
     }
+
     var symbol: String {
         switch self {
         case .music: "music.note"
@@ -771,4 +878,3 @@ extension MediaKind {
         }
     }
 }
-
