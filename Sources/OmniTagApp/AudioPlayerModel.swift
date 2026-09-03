@@ -10,7 +10,7 @@ import Observation
 @MainActor
 final class AudioPlayerModel {
     var currentURL: URL?
-    var isPlaying: Bool = false
+    var isPlaying = false
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
 
@@ -47,12 +47,12 @@ final class AudioPlayerModel {
         let asset = AVURLAsset(url: url)
         let playerItem = AVPlayerItem(asset: asset)
         let newPlayer = AVPlayer(playerItem: playerItem)
-        self.player = newPlayer
+        player = newPlayer
 
         Task { [weak self] in
             guard let self else { return }
-            if let dur = try? await asset.load(.duration), dur.isNumeric {
-                self.duration = dur.seconds
+            if let dur = try? await asset.load(.duration), dur.isNumeric, currentURL == url {
+                duration = dur.seconds
             }
         }
 
