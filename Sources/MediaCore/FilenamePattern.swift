@@ -17,11 +17,17 @@ public struct FilenamePattern: Sendable, Equatable {
 
     public init(_ source: String) {
         self.source = source
-        self.tokens = Self.tokenise(source)
+        tokens = Self.tokenise(source)
     }
 
     public var fields: [TagKey] {
-        tokens.compactMap { if case .field(let key) = $0 { key } else { nil } }
+        tokens.compactMap {
+            if case let .field(key) = $0 {
+                key
+            } else {
+                nil
+            }
+        }
     }
 
     // MARK: - Field vocabulary
@@ -41,7 +47,7 @@ public struct FilenamePattern: Sendable, Equatable {
         ("subtitle", .subtitle),
         ("show", .showName), ("season", .seasonNumber), ("episode", .episodeNumber),
         ("episodetitle", .episodeTitle), ("director", .director),
-        ("studio", .studio), ("rating", .contentRating),
+        ("studio", .studio), ("rating", .contentRating)
     ]
 
     /// Keys written as counting numbers: padded on the way out, parsed as
@@ -49,18 +55,24 @@ public struct FilenamePattern: Sendable, Equatable {
     /// a year is never zero-padded and never two digits.
     static let counting: Set<TagKey> = [
         .trackNumber, .trackTotal, .discNumber, .discTotal,
-        .seasonNumber, .episodeNumber, .seriesIndex,
+        .seasonNumber, .episodeNumber, .seriesIndex
     ]
 
     static func key(named name: String) -> TagKey {
         let lower = name.lowercased()
-        if let match = vocabulary.first(where: { $0.name == lower }) { return match.key }
+        if let match = vocabulary.first(where: { $0.name == lower }) {
+            return match.key
+        }
         return .custom(name.uppercased())
     }
 
     public static func label(for key: TagKey) -> String {
-        if let match = vocabulary.first(where: { $0.key == key }) { return match.name }
-        if case .custom(let name) = key { return name.lowercased() }
+        if let match = vocabulary.first(where: { $0.key == key }) {
+            return match.name
+        }
+        if case let .custom(name) = key {
+            return name.lowercased()
+        }
         return "field"
     }
 
@@ -72,11 +84,14 @@ public struct FilenamePattern: Sendable, Equatable {
         var rest = Substring(source)
 
         func flush() {
-            if !literal.isEmpty { tokens.append(.literal(literal)); literal = "" }
+            if !literal.isEmpty {
+                tokens.append(.literal(literal))
+                literal = ""
+            }
         }
 
         while let start = rest.firstIndex(of: "%") {
-            literal += rest[rest.startIndex..<start]
+            literal += rest[rest.startIndex ..< start]
             let afterPercent = rest.index(after: start)
             // "%%" is a literal percent sign.
             if afterPercent < rest.endIndex, rest[afterPercent] == "%" {
@@ -93,7 +108,7 @@ public struct FilenamePattern: Sendable, Equatable {
                 break
             }
             flush()
-            tokens.append(.field(key(named: String(rest[afterPercent..<close]))))
+            tokens.append(.field(key(named: String(rest[afterPercent ..< close]))))
             rest = rest[rest.index(after: close)...]
         }
         literal += rest
@@ -108,7 +123,6 @@ public struct FilenamePattern: Sendable, Equatable {
         public let name: String
         /// Fields the pattern asked for that the file does not carry.
         public let missing: [TagKey]
-        public var isUsable: Bool { !name.isEmpty }
     }
 
     public func render(_ tags: TagSet) -> Rendered {
@@ -116,11 +130,13 @@ public struct FilenamePattern: Sendable, Equatable {
         var missing: [TagKey] = []
         for token in tokens {
             switch token {
-            case .literal(let text):
+            case let .literal(text):
                 name += text
-            case .field(let key):
+            case let .field(key):
                 guard let value = Self.text(for: key, in: tags) else {
-                    if !missing.contains(key) { missing.append(key) }
+                    if !missing.contains(key) {
+                        missing.append(key)
+                    }
                     continue
                 }
                 name += value
@@ -145,8 +161,12 @@ public struct FilenamePattern: Sendable, Equatable {
     /// tag containing either would otherwise write outside the folder.
     static func sanitise(_ name: String) -> String {
         var cleaned = name.unicodeScalars.map { scalar -> Character in
-            if scalar == "/" || scalar == ":" { return "-" }
-            if CharacterSet.controlCharacters.contains(scalar) { return " " }
+            if scalar == "/" || scalar == ":" {
+                return "-"
+            }
+            if CharacterSet.controlCharacters.contains(scalar) {
+                return " "
+            }
             return Character(scalar)
         }.reduce(into: "") { $0.append($1) }
 
@@ -157,7 +177,9 @@ public struct FilenamePattern: Sendable, Equatable {
 
         // 255 bytes is the filesystem limit; 200 leaves room for an extension
         // and for the " 2" a collision would add.
-        while cleaned.utf8.count > 200 { cleaned.removeLast() }
+        while cleaned.utf8.count > 200 {
+            cleaned.removeLast()
+        }
         return cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
     }
 
@@ -167,7 +189,7 @@ public struct FilenamePattern: Sendable, Equatable {
     /// does not match — never a half-filled `TagSet`, because a guess written
     /// across a selection is exactly the silent damage this app refuses.
     public func parse(_ filename: String) -> TagSet? {
-        let fields = self.fields
+        let fields = fields
         guard !fields.isEmpty else { return nil }
         let stem = (filename as NSString).deletingPathExtension
 
@@ -175,9 +197,9 @@ public struct FilenamePattern: Sendable, Equatable {
         var captured: [TagKey] = []
         for token in tokens {
             switch token {
-            case .literal(let text):
+            case let .literal(text):
                 expression += NSRegularExpression.escapedPattern(for: text)
-            case .field(let key):
+            case let .field(key):
                 // The same field twice has to agree: a back-reference says so
                 // in the regex rather than by comparing captures afterwards.
                 if let earlier = captured.firstIndex(of: key) {
@@ -193,8 +215,9 @@ public struct FilenamePattern: Sendable, Equatable {
 
         guard let regex = try? NSRegularExpression(pattern: expression, options: [.dotMatchesLineSeparators]),
               let match = regex.firstMatch(
-                in: stem, options: [.anchored],
-                range: NSRange(stem.startIndex..., in: stem))
+                  in: stem, options: [.anchored],
+                  range: NSRange(stem.startIndex..., in: stem)
+              )
         else { return nil }
 
         var tags = TagSet()
