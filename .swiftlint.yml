@@ -1,0 +1,84 @@
+disabled_rules:
+  - todo
+  - optional_data_string_conversion
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - fatal_error_message
+  - first_where
+  - modifier_order
+  - unneeded_parentheses_in_closure_argument
+  # redundant_nil_coalescing is NOT enabled: it cannot tell a genuinely
+  # redundant `?? nil` from one flattening a double-optional (`T??` → `T?`,
+  # e.g. MatroskaWriterTests.seekPosition's return type) and will strip the
+  # latter, breaking the build. Confirmed the hard way — see git history.
+
+excluded:
+  - .build
+  - DerivedData
+  - OmniTag.xcodeproj
+  # Loose root-level scratch scripts, not part of any SwiftPM target.
+  - test.swift
+  - test_canadd.swift
+
+line_length:
+  warning: 160
+  error: 260
+  ignores_comments: true
+  ignores_urls: true
+  ignores_interpolated_strings: true
+
+file_length:
+  warning: 1000
+  error: 1500
+
+type_body_length:
+  warning: 400
+  # MetadataWizardView is a genuinely large SwiftUI step-based wizard body
+  # (~790 lines) — raised rather than split, since that's a real refactor
+  # decision, not a lint-config one. Worth revisiting if it grows further.
+  error: 800
+
+function_body_length:
+  warning: 100
+  error: 200
+
+cyclomatic_complexity:
+  warning: 20
+  error: 30
+
+# `buildSnapshot()` and a save-progress callback both return a genuine
+# 4-value tuple (tags/artwork/chapters/clearing-keys; item/done/total) —
+# not a struct-shaped concept worth naming, per AGENTS.md/DECISIONS.md's
+# "no abstraction the code doesn't need" spirit. Default max is 2.
+large_tuple:
+  warning: 4
+  error: 5
+
+# Every API client (TMDBClient, AudnexusClient, AudibleClient, ...) nests
+# its private wire-format Decodable structs two levels deep by established
+# convention (`private struct MovieDetail { struct Genre: Decodable {...} }`)
+# — deliberate, not accidental depth. Default max is 1.
+nesting:
+  type_level:
+    warning: 2
+
+identifier_name:
+  min_length:
+    warning: 1
+  excluded:
+    - id
+    - to
+    - fm
+    - a
+    - b
+    - f
+    - n
+    - s
+    # OpenLibraryClient decodes plain (non-snake-case-converting) JSON, so
+    # these Decodable properties must match OpenLibrary's own field names
+    # verbatim.
+    - author_name
+    - first_publish_year
+    - cover_i
