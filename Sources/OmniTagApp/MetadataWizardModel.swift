@@ -1,26 +1,41 @@
 import Foundation
 import MediaCore
 import MetadataAPI
+import TagIO
 
 @MainActor @Observable
 public final class MetadataWizardModel {
     public enum WizardStep: Int, CaseIterable, Identifiable, Comparable {
         case search = 0
+        case episode
         case tags
         case chapters
         case summary
 
-        public var id: Int { rawValue }
+        public var id: Int {
+            rawValue
+        }
+
         public var title: String {
             switch self {
             case .search: "Find"
+            case .episode: "Episode"
             case .tags: "Tags"
             case .chapters: "Chapters"
             case .summary: "Apply"
             }
         }
 
-        public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+        public static func < (a: Self, b: Self) -> Bool {
+            a.rawValue < b.rawValue
+        }
+    }
+
+    public enum EpisodeLoadState {
+        case idle
+        case loading
+        case loaded([TMDBClient.EpisodeSummary])
+        case error(String)
     }
 
     public enum SearchState {
@@ -36,7 +51,11 @@ public final class MetadataWizardModel {
     public var step: WizardStep = .search
     public var searchState: SearchState = .idle
     public var region: AudibleRegion = .unitedKingdom {
-        didSet { if region != oldValue { rebuildProviders() } }
+        didSet {
+            if region != oldValue {
+                rebuildProviders()
+            }
+        }
     }
 
     /// The providers serving this tab, and the one in use. The wizard never
@@ -51,20 +70,52 @@ public final class MetadataWizardModel {
     public var candidate: MetadataCandidate?
     public var details: MetadataDetails?
 
+    /// True for the life of a TV candidate's flow, whether or not an episode
+    /// has been picked yet — this is what keeps `.episode` addressable by
+    /// `retreat()` even after picking one. A prior version cleared this the
+    /// moment an episode was chosen, which made `.episode` vanish from
+    /// `steps` entirely: pressing Back from the Tags step then skipped past
+    /// the episode list straight to Search, silently losing the show and the
+    /// picked episode both. See `docs/MOVIES_TV.md`.
+    public private(set) var isEpisodeFlow = false
+    public var selectedSeason = 1 {
+        didSet {
+            guard selectedSeason != oldValue else { return }
+            Task { await loadSeasonEpisodes() }
+        }
+    }
+
+    public var episodeLoadState: EpisodeLoadState = .idle
+
     public var tagDiff = TagDiff(current: TagSet(), proposed: TagSet(), kind: .audiobook)
     public var selectedTagKeys: Set<TagKey> = []
 
-    /// The pairing as the provider returned it. `chapterDiff` is this with a
-    /// strategy applied and the user's edits on top, so switching strategy
-    /// twice does not compound.
+    /// The alignment as it came out of the provider, kept so "Reset" can throw
+    /// away the bulk edits and hand-typed titles without another round trip.
     private var baseChapterDiff = ChapterDiff(current: [], proposed: [])
     public var chapterDiff = ChapterDiff(current: [], proposed: [])
     public var selectedChapterIDs: Set<ChapterDiff.Row.ID> = []
-    public var chapterStrategy: ChapterDiff.MergeStrategy = .takeTheirs {
+    public var skipChapters = false
+
+    /// What the chapters step should say about this pairing, if anything —
+    /// worked out once, when the candidate is chosen.
+    public private(set) var chapterNotice: String?
+    public var cleanOverwrite = false {
         didSet {
-            guard chapterStrategy != oldValue else { return }
-            chapterDiff = baseChapterDiff.applying(chapterStrategy)
+            guard cleanOverwrite != oldValue else { return }
+            if cleanOverwrite {
+                selectedTagKeys.formUnion(tagDiff.rows.filter { $0.current != nil }.map(\.key))
+            } else {
+                selectedTagKeys.subtract(tagDiff.rows.filter { $0.proposed == nil }.map(\.key))
+            }
         }
+    }
+
+    public var clearingTagKeys: Set<TagKey> {
+        guard cleanOverwrite else { return [] }
+        return Set(tagDiff.rows.filter { row in
+            row.current != nil && row.proposed == nil && selectedTagKeys.contains(row.key)
+        }.map(\.key))
     }
 
     /// True while the artwork download and tag write are in flight, so the
@@ -72,45 +123,24 @@ public final class MetadataWizardModel {
     public var isApplying = false
     public var applyError: String?
 
-    public func shiftProposedDown(for selection: Set<Int>) {
-        let indices = selection.sorted().reversed()
-        var newRows = chapterDiff.rows
-        if let maxSelected = indices.first, maxSelected == newRows.count - 1 {
-            newRows.append(ChapterDiff.Row(index: newRows.count, current: nil, proposed: nil))
+    /// Move the ticked titles a row down or up.
+    ///
+    /// Only the titles move. The times belong to the audio, not to the provider,
+    /// so a list that came back one row out is fixed by sliding the words along.
+    public func shiftProposedTitles(by offset: Int) {
+        guard offset != 0, !selectedChapterIDs.isEmpty else { return }
+        var titles = chapterDiff.rows.map { $0.proposed?.title }
+        for index in offset > 0 ? selectedChapterIDs.sorted().reversed() : selectedChapterIDs.sorted() {
+            let destination = index + offset
+            guard titles.indices.contains(index), titles.indices.contains(destination) else { continue }
+            titles.swapAt(index, destination)
         }
-        for index in indices {
-            let nextIndex = index + 1
-            guard nextIndex < newRows.count else { continue }
-            let temp = newRows[nextIndex].proposed
-            newRows[nextIndex].proposed = newRows[index].proposed
-            newRows[index].proposed = temp
+        for index in chapterDiff.rows.indices {
+            chapterDiff.rows[index].proposed?.title = titles[index] ?? ""
         }
-        chapterDiff.rows = newRows
-        for i in newRows.indices {
-            chapterDiff.rows[i] = ChapterDiff.Row(index: i, current: newRows[i].current, proposed: newRows[i].proposed)
-        }
-        selectedChapterIDs = Set(selection.map { $0 + 1 })
-    }
-
-    public func shiftProposedUp(for selection: Set<Int>) {
-        let indices = selection.sorted()
-        var newRows = chapterDiff.rows
-        for index in indices {
-            guard index > 0 else { continue }
-            let prevIndex = index - 1
-            let temp = newRows[prevIndex].proposed
-            newRows[prevIndex].proposed = newRows[index].proposed
-            newRows[index].proposed = temp
-        }
-        chapterDiff.rows = newRows
-        for i in newRows.indices {
-            chapterDiff.rows[i] = ChapterDiff.Row(index: i, current: newRows[i].current, proposed: newRows[i].proposed)
-        }
-        var newSelection = Set<Int>()
-        for idx in selection {
-            newSelection.insert(idx > 0 ? idx - 1 : 0)
-        }
-        selectedChapterIDs = newSelection
+        selectedChapterIDs = Set(selectedChapterIDs.compactMap { index in
+            titles.indices.contains(index + offset) ? index + offset : nil
+        })
     }
 
     /// Kept so stepping Back from the tags step restores the whole result list
@@ -124,11 +154,11 @@ public final class MetadataWizardModel {
         kind: MediaKind = .audiobook,
         downloader: ArtworkDownloader = ArtworkDownloader()
     ) {
-        self.selectedItems = items
+        selectedItems = items
         self.kind = kind
         self.downloader = downloader
         if let first = items.first {
-            self.query = MetadataQuery(from: first.tags, filename: first.url.lastPathComponent)
+            query = MetadataQuery(from: first.tags, filename: first.url.lastPathComponent)
         }
         rebuildProviders()
     }
@@ -141,19 +171,60 @@ public final class MetadataWizardModel {
 
     /// Audible has storefronts and OpenLibrary does not, so the region control
     /// only appears where it means something.
-    public var showsRegionPicker: Bool { provider is AudibleMetadataProvider }
+    public var showsRegionPicker: Bool {
+        provider is AudibleMetadataProvider
+    }
 
-    public var searchHint: String { provider?.searchHint ?? "Search" }
+    public var searchHint: String {
+        provider?.searchHint ?? "Search"
+    }
 
     /// One book's chapters split across twenty part files would give every part
     /// the whole book's chapter list, so chapters are a single-file operation.
-    public var canWriteChapters: Bool { selectedItems.count == 1 }
+    public var canWriteChapters: Bool {
+        selectedItems.count == 1
+    }
 
-    public var hasProviderChapters: Bool { !(details?.chapters.isEmpty ?? true) }
+    /// One episode's season/episode number/title applied to every file in a
+    /// multi-file selection would be silently wrong for every file but one —
+    /// the same reasoning as `canWriteChapters`.
+    public var canPickEpisode: Bool {
+        selectedItems.count == 1
+    }
 
-    /// The chapters step is skipped entirely when there is nothing to reconcile.
+    public var hasProviderChapters: Bool {
+        !(details?.chapters.isEmpty ?? true)
+    }
+
+    /// The single question the Apply button, the summary tile and the snapshot
+    /// all ask: are chapters part of this write?
+    public var willWriteChapters: Bool {
+        hasProviderChapters && canWriteChapters && !skipChapters
+    }
+
+    /// mkv has no artwork writer yet (`MatroskaTagWriter.write` takes no
+    /// artwork parameter — see `docs/STATUS.md`), so a downloaded cover would
+    /// otherwise vanish with no error and no explanation. True only when
+    /// every selected file could actually receive it.
+    public var canWriteArtwork: Bool {
+        !selectedItems.isEmpty && selectedItems.allSatisfy { MediaTagReader.canWriteArtwork($0.container) }
+    }
+
+    /// There is a cover to offer, but at least one selected file cannot
+    /// store it — worth telling the user before Apply, not after.
+    public var hasUnwritableArtwork: Bool {
+        (candidate?.artworkURL ?? details?.book.artworkURL) != nil && !canWriteArtwork
+    }
+
+    /// The chapters step is skipped when there is nothing to reconcile; the
+    /// episode step stays in the wizard for as long as a TV candidate is
+    /// active, picked episode or not, so Back can always return to it rather
+    /// than skipping straight to Search.
     public var steps: [WizardStep] {
-        WizardStep.allCases.filter { $0 != .chapters || (hasProviderChapters && canWriteChapters) }
+        WizardStep.allCases.filter {
+            ($0 != .chapters || (hasProviderChapters && canWriteChapters))
+                && ($0 != .episode || isEpisodeFlow)
+        }
     }
 
     public func advance() {
@@ -167,7 +238,9 @@ public final class MetadataWizardModel {
         applyError = nil
     }
 
-    public var isLastStep: Bool { step == steps.last }
+    public var isLastStep: Bool {
+        step == steps.last
+    }
 
     public func search() async {
         guard !query.isEmpty else {
@@ -180,7 +253,7 @@ public final class MetadataWizardModel {
         }
         searchState = .searching
         do {
-            let candidates = try await provider.search(query, limit: 20)
+            let candidates = try await provider.search(query, kind: kind, limit: 20)
             lastResults = candidates
             searchState = candidates.isEmpty
                 ? .empty(emptyHint(for: provider))
@@ -201,23 +274,89 @@ public final class MetadataWizardModel {
         self.candidate = candidate
         searchState = .loadingDetails(candidate)
         do {
-            let details = try await provider.details(for: candidate)
-            self.details = details
+            let details = try await provider.details(for: candidate, kind: kind)
 
-            let currentTags = TagSet.common(of: selectedItems.map(\.tags))
-            self.tagDiff = TagDiff(current: currentTags, proposed: details.book.tagSet, kind: self.kind)
-            // Everything the provider actually answered, ticked by default.
-            self.selectedTagKeys = tagDiff.keys(for: .overwriteAll)
+            // A TV search candidate names a show, not an episode — see
+            // `docs/MOVIES_TV.md`. Land on the episode picker instead of
+            // building a tag diff against show-level data nobody asked to write.
+            // Skipped for a multi-file selection: one episode's number and
+            // title cannot apply to more than one file, so the show-level
+            // fields (showName, year, genre) are offered instead — the same
+            // choice `canWriteChapters` makes for chapters.
+            if kind == .tvEpisode, provider.hasEpisodePicker, canPickEpisode {
+                self.details = details
+                isEpisodeFlow = true
+                searchState = lastResults.isEmpty ? .results([candidate]) : .results(lastResults)
+                step = .episode
+                selectedSeason = 1
+                await loadSeasonEpisodes()
+                return
+            }
 
-            let mine = selectedItems.count == 1 ? (selectedItems.first?.chapters ?? []) : []
-            self.baseChapterDiff = ChapterDiff(current: mine, proposed: details.chapters)
-            self.chapterDiff = baseChapterDiff.applying(chapterStrategy)
-
-            self.searchState = lastResults.isEmpty ? .results([candidate]) : .results(lastResults)
-            self.step = .tags
+            // A fresh non-TV candidate (or a TV candidate too many files to
+            // pick an episode for) never carries a stale episode flow from a
+            // previous search in this same wizard session.
+            isEpisodeFlow = false
+            applyDetails(details, candidate: candidate)
+            searchState = lastResults.isEmpty ? .results([candidate]) : .results(lastResults)
+            step = .tags
         } catch {
             searchState = .error(error.localizedDescription)
         }
+    }
+
+    /// The episode step's list, refetched whenever `selectedSeason` changes.
+    public func loadSeasonEpisodes() async {
+        guard let tmdb = provider as? TMDBProvider, let showID = candidate?.id else { return }
+        episodeLoadState = .loading
+        do {
+            let episodes = try await tmdb.seasonEpisodes(showID: showID, season: selectedSeason)
+            episodeLoadState = .loaded(episodes)
+        } catch {
+            episodeLoadState = .error(error.localizedDescription)
+        }
+    }
+
+    /// Resolves the show + season/episode into the same shape every other
+    /// kind reaches `.tags` with, then advances exactly as `select` does.
+    public func selectEpisode(_ episode: TMDBClient.EpisodeSummary) async {
+        guard let tmdb = provider as? TMDBProvider, let candidate, let showID = self.candidate?.id else { return }
+        searchState = .loadingDetails(candidate)
+        do {
+            let details = try await tmdb.episodeDetails(
+                showID: showID, showName: candidate.title, season: selectedSeason, episode: episode.number
+            )
+            applyDetails(details, candidate: candidate)
+            searchState = lastResults.isEmpty ? .results([candidate]) : .results(lastResults)
+            step = .tags
+        } catch {
+            searchState = .error(error.localizedDescription)
+        }
+    }
+
+    /// The tag-diff and chapter-diff build shared by a resolved movie/book/
+    /// audiobook candidate and a resolved TV episode.
+    private func applyDetails(_ details: MetadataDetails, candidate: MetadataCandidate) {
+        var details = details
+        if details.book.series == nil && candidate.series != nil {
+            details.book.series = candidate.series
+            details.book.seriesIndex = candidate.seriesIndex
+        }
+        if details.book.publisher == nil && candidate.publisher != nil {
+            details.book.publisher = candidate.publisher
+        }
+        self.details = details
+
+        let currentTags = TagSet.common(of: selectedItems.map(\.tags))
+        tagDiff = TagDiff(current: currentTags, proposed: details.book.tagSet, kind: kind)
+        cleanOverwrite = true
+        // In clean overwrite, all proposed keys are written and unprovided current keys are cleared:
+        selectedTagKeys = Set(tagDiff.rows.filter { $0.proposed != nil || $0.current != nil }.map(\.key))
+
+        let mine = selectedItems.count == 1 ? (selectedItems.first?.chapters ?? []) : []
+        baseChapterDiff = ChapterDiff(current: mine, proposed: details.chapters).aligned()
+        chapterDiff = baseChapterDiff
+        (skipChapters, chapterNotice) = Self.chapterDefault(file: mine, provider: details.chapters)
     }
 
     /// Offered in the chapters step's bulk menu. An 85-chapter book is not
@@ -228,38 +367,74 @@ public final class MetadataWizardModel {
         chapterDiff = chapterDiff.renamingAll(with: pattern)
     }
 
-    /// Throw away the bulk edits and hand-typed titles, back to the strategy.
+    /// Throw away the bulk edits and hand-typed titles.
     public func resetChapters() {
-        chapterDiff = baseChapterDiff.applying(chapterStrategy)
+        chapterDiff = baseChapterDiff
+    }
+
+    /// Whether to start with chapters skipped, and what to tell the user.
+    ///
+    /// The file's timings are always kept, so a differing chapter count is worth
+    /// a note, not a refusal. Real titles the provider cannot match are the one
+    /// case where doing nothing is the better default.
+    static func chapterDefault(file: [Chapter], provider: [Chapter]) -> (skip: Bool, notice: String?) {
+        guard !provider.isEmpty else { return (false, nil) }
+        if ChapterDiff.hasRichTitles(file), !ChapterDiff.hasRichTitles(provider) {
+            let sample = file.first { !ChapterDiff.isGeneric(title: $0.title) }?.title
+            return (true, "This file already has written-out chapter titles"
+                + (sample.map { " (\"\($0)\")" } ?? "")
+                + " and the provider only has numbered ones, so chapters start skipped.")
+        }
+        if file.count >= 2, file.count != provider.count {
+            return (false, "The file has \(file.count) chapters and the provider \(provider.count). "
+                + "Your timings are kept; titles are matched by timestamp.")
+        }
+        return (false, nil)
     }
 
     public func apply(_ action: TagDiff.MergeAction) {
-        selectedTagKeys = tagDiff.keys(for: action)
+        switch action {
+        case .merge:
+            cleanOverwrite = false
+            selectedTagKeys = tagDiff.keys(for: .merge)
+        case .overwriteAll:
+            cleanOverwrite = true
+            selectedTagKeys = Set(tagDiff.rows.filter { $0.proposed != nil || $0.current != nil }.map(\.key))
+        case .none:
+            cleanOverwrite = false
+            selectedTagKeys = []
+        }
     }
 
-    /// Rows that are ticked and actually differ from what the file says — what
-    /// the summary counts, rather than every ticked row.
+    /// Rows that are ticked and actually differ from what the file says (updates + removals).
     public var changedTagCount: Int {
-        tagDiff.rows.filter { selectedTagKeys.contains($0.key) && $0.isChanged }.count
+        let updated = tagDiff.rows.filter { row in
+            row.proposed != nil && selectedTagKeys.contains(row.key) && row.isChanged
+        }.count
+        let cleared = clearingTagKeys.count
+        return updated + cleared
     }
 
-    public func buildSnapshot() async throws -> (TagSet, [Artwork], [Chapter]?) {
+    public func buildSnapshot() async throws -> (TagSet, [Artwork], [Chapter]?, Set<TagKey>) {
         guard let candidate, let details else { throw MetadataError.emptyQuery }
 
         let tags = tagDiff.delta(for: selectedTagKeys)
+        let clearing = clearingTagKeys
 
         // Artwork is a nicety; failing to fetch it must not cost the user the
         // tags they just reviewed, so the failure is reported, not thrown.
+        // mkv has no artwork writer yet, so downloading one there would be a
+        // wasted round trip for a cover that can never be stored.
         var artwork: [Artwork] = []
-        if let url = candidate.artworkURL ?? details.book.artworkURL {
+        if canWriteArtwork, let url = candidate.artworkURL ?? details.book.artworkURL {
             do {
-                artwork = [try await downloader.download(from: url)]
+                artwork = try await [downloader.download(from: url)]
             } catch {
                 applyError = "Tags applied, but the cover could not be downloaded: \(error.localizedDescription)"
             }
         }
 
-        let chapters = (canWriteChapters && hasProviderChapters) ? chapterDiff.resolved : nil
-        return (tags, artwork, chapters)
+        let chapters = willWriteChapters ? chapterDiff.resolved : nil
+        return (tags, artwork, chapters, clearing)
     }
 }
