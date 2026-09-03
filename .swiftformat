@@ -1,0 +1,12 @@
+--swiftversion 6.2
+--indent 4
+--allman false
+--semicolons never
+--redundanttype inferred
+--stripunusedargs closure-only
+--self remove
+--trimwhitespace always
+--disable swiftTestingTestCaseNames
+--disable trailingCommas
+--disable wrapMultilineStatementBraces
+--exclude .build,DerivedData,OmniTag.xcodeproj,test.swift,test_canadd.swift
