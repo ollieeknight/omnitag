@@ -9,7 +9,9 @@ struct RenameSheet: View {
     enum Mode: String, CaseIterable, Identifiable {
         case toFilename = "Tags to Filename"
         case toTags = "Filename to Tags"
-        var id: String { rawValue }
+        var id: String {
+            rawValue
+        }
     }
 
     let items: [MediaItem]
@@ -30,12 +32,17 @@ struct RenameSheet: View {
     // ponytail: recomputed on every redraw, and it stats one file per row.
     // Fine for a selection you can see; cache it against the pattern if
     // someone renames a thousand files at once and typing drags.
-    private var plan: RenamePlan { RenamePlan(items: items, pattern: pattern) }
+    private var plan: RenamePlan {
+        RenamePlan(items: items, pattern: pattern)
+    }
 
     /// One file's name read through the pattern; `tags` is nil when the name
     /// does not match, which is a row the user sees rather than a silent skip.
     private struct ParsedRow: Identifiable {
-        var id: URL { item.url }
+        var id: URL {
+            item.url
+        }
+
         let item: MediaItem
         let tags: TagSet?
     }
@@ -49,7 +56,11 @@ struct RenameSheet: View {
             header
             Divider()
             Group {
-                if mode == .toFilename { renamePreview } else { parsePreview }
+                if mode == .toFilename {
+                    renamePreview
+                } else {
+                    parsePreview
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
@@ -72,10 +83,11 @@ struct RenameSheet: View {
                 TextField(
                     "Pattern",
                     text: mode == .toFilename ? $renamePattern : $parsePattern,
-                    prompt: Text("%artist% - %title%"))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityLabel("Filename pattern")
+                    prompt: Text("%artist% - %title%")
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+                .accessibilityLabel("Filename pattern")
 
                 fieldMenu
                 presetMenu
@@ -119,7 +131,11 @@ struct RenameSheet: View {
         Menu {
             ForEach(Self.presets(for: kind), id: \.self) { preset in
                 Button(preset) {
-                    if mode == .toFilename { renamePattern = preset } else { parsePattern = preset }
+                    if mode == .toFilename {
+                        renamePattern = preset
+                    } else {
+                        parsePattern = preset
+                    }
                 }
             }
         } label: {
@@ -145,7 +161,11 @@ struct RenameSheet: View {
     }
 
     private func insert(_ token: String) {
-        if mode == .toFilename { renamePattern += token } else { parsePattern += token }
+        if mode == .toFilename {
+            renamePattern += token
+        } else {
+            parsePattern += token
+        }
     }
 
     private var footer: some View {
@@ -156,7 +176,9 @@ struct RenameSheet: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
-            if isApplying { ProgressView().controlSize(.small) }
+            if isApplying {
+                ProgressView().controlSize(.small)
+            }
             Button(mode == .toFilename ? "Rename" : "Apply Tags") { apply() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(isApplying || actionableCount == 0)
@@ -172,9 +194,9 @@ struct RenameSheet: View {
         let total = items.count
         switch (mode, actionableCount) {
         case (.toFilename, 0): return "Nothing to rename in \(total) file\(total == 1 ? "" : "s")"
-        case (.toFilename, let count): return "\(count) of \(total) will be renamed"
+        case let (.toFilename, count): return "\(count) of \(total) will be renamed"
         case (.toTags, 0): return "No filename matches this pattern"
-        case (.toTags, let count): return "\(count) of \(total) will be tagged"
+        case let (.toTags, count): return "\(count) of \(total) will be tagged"
         }
     }
 
@@ -187,7 +209,8 @@ struct RenameSheet: View {
                 await applyTags(Dictionary(
                     uniqueKeysWithValues: parsed.compactMap { row in
                         row.tags.map { (row.item.url, $0) }
-                    }))
+                    }
+                ))
             }
             isApplying = false
             dismiss()
@@ -223,11 +246,12 @@ struct RenameSheet: View {
         case .unchanged:
             Label("Already named", systemImage: "checkmark.circle")
                 .foregroundStyle(.secondary)
-        case .missing(let keys):
+        case let .missing(keys):
             Label(
                 "No \(keys.map { FilenamePattern.label(for: $0) }.joined(separator: ", "))",
-                systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(.orange)
         case .empty:
             Label("Nothing to name it", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
