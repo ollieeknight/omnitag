@@ -6,12 +6,40 @@ public protocol HTTPTransporting: Sendable {
     func data(from url: URL) async throws -> (Data, Int)
 }
 
-public enum MetadataError: Error, Equatable {
+public enum MetadataError: Error, Equatable, LocalizedError {
     case emptyQuery
-    case server(status: Int)
+    case server(status: Int, message: String? = nil)
     case notAvailable(region: String)
     case malformedResponse(String)
     case transport(String)
+    /// Distinct from `.transport`/`.server` so the wizard can say "add your
+    /// TMDB key in Preferences" instead of a generic network failure.
+    case missingAPIKey(provider: String)
+
+    /// Without this, `error.localizedDescription` (what every wizard catch
+    /// block shows the user) falls back to Foundation's generic "The operation
+    /// couldn't be completed" — silently dropping `.missingAPIKey`'s whole
+    /// reason for existing.
+    public var errorDescription: String? {
+        switch self {
+        case .emptyQuery:
+            "Type something to search for."
+        case let .server(status, message):
+            if let message {
+                "Server error \(status): \(message)"
+            } else {
+                "Server error \(status)."
+            }
+        case let .notAvailable(region):
+            "Not available in \(region)."
+        case let .malformedResponse(detail):
+            "Unexpected response: \(detail)"
+        case let .transport(detail):
+            "Network error: \(detail)"
+        case let .missingAPIKey(provider):
+            "Add your \(provider) key in Preferences (⌘,) to search."
+        }
+    }
 }
 
 public struct URLSessionTransport: HTTPTransporting {
