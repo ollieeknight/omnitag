@@ -15,12 +15,12 @@ public struct OpenLibraryClient: Sendable {
         components.queryItems = [
             URLQueryItem(name: "q", value: query.searchTerms),
             URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "fields", value: "key,title,author_name,first_publish_year,cover_i,publisher,isbn")
+            URLQueryItem(name: "fields", value: "key,title,subtitle,author_name,first_publish_year,cover_i,publisher,isbn,subject,language,series")
         ]
 
         guard let url = components.url else { throw MetadataError.malformedResponse("bad URL") }
         let (data, status) = try await transport.data(from: url)
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
 
         do {
             let response = try JSONDecoder().decode(SearchResponse.self, from: data)
@@ -35,25 +35,57 @@ public struct OpenLibraryClient: Sendable {
         components.queryItems = [
             URLQueryItem(name: "q", value: key),
             URLQueryItem(name: "limit", value: "1"),
-            URLQueryItem(name: "fields", value: "key,title,author_name,first_publish_year,cover_i,publisher,isbn,subject")
+            URLQueryItem(name: "fields", value: "key,title,subtitle,author_name,first_publish_year,cover_i,publisher,isbn,subject,language,series")
         ]
 
         guard let url = components.url else { throw MetadataError.malformedResponse("bad URL") }
         let (data, status) = try await transport.data(from: url)
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
 
         do {
             let response = try JSONDecoder().decode(SearchResponse.self, from: data)
             guard let doc = response.docs.first else {
                 throw MetadataError.notAvailable(region: "openlibrary")
             }
-            return doc.book
+
+            var description: String?
+            if key.hasPrefix("/works/"), let workUrl = URL(string: "https://openlibrary.org\(key).json") {
+                if let (workData, workStatus) = try? await transport.data(from: workUrl), (200 ..< 300).contains(workStatus) {
+                    description = try? JSONDecoder().decode(WorkDetail.self, from: workData).descriptionText
+                }
+            }
+
+            var record = doc.book
+            if let description {
+                record.summary = description
+            }
+            return record
         } catch {
             throw MetadataError.malformedResponse(error.localizedDescription)
         }
     }
 
     // MARK: wire format
+
+    private struct WorkDetail: Decodable {
+        private struct Wrapped: Decodable { var value: String }
+
+        var descriptionText: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let str = try? container.decode(String.self, forKey: .description) {
+                descriptionText = str
+            } else if let wrapped = try? container.decode(Wrapped.self, forKey: .description) {
+                descriptionText = wrapped.value
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case description
+        }
+    }
+
     private struct SearchResponse: Decodable {
         var docs: [Doc]
     }
@@ -61,6 +93,7 @@ public struct OpenLibraryClient: Sendable {
     private struct Doc: Decodable {
         var key: String
         var title: String
+        var subtitle: String?
         var author_name: [String]?
         var first_publish_year: Int?
         var cover_i: Int?
@@ -68,6 +101,7 @@ public struct OpenLibraryClient: Sendable {
         var subject: [String]?
         var isbn: [String]?
         var language: [String]?
+        var series: [String]?
 
         var artworkURL: URL? {
             cover_i.flatMap { URL(string: "https://covers.openlibrary.org/b/id/\($0)-L.jpg") }
@@ -86,13 +120,13 @@ public struct OpenLibraryClient: Sendable {
             MetadataCandidate(
                 id: key,
                 title: title,
-                subtitle: nil,
+                subtitle: subtitle,
                 authors: author_name ?? [],
                 narrators: [],
                 publisher: publisher?.first,
                 year: first_publish_year,
                 runtimeMinutes: nil,
-                series: nil,
+                series: series?.first,
                 seriesIndex: nil,
                 summary: nil,
                 artworkURL: artworkURL
@@ -103,7 +137,7 @@ public struct OpenLibraryClient: Sendable {
             MetadataRecord(
                 id: key,
                 title: title,
-                subtitle: nil,
+                subtitle: subtitle,
                 authors: author_name ?? [],
                 narrators: [],
                 publisher: publisher?.first,
@@ -111,12 +145,13 @@ public struct OpenLibraryClient: Sendable {
                 language: language?.first,
                 summary: nil,
                 genres: subject ?? [],
-                series: nil,
+                series: series?.first,
                 seriesIndex: nil,
                 runtimeMinutes: nil,
                 artworkURL: artworkURL,
                 asin: nil,
-                isbn: unambiguousISBN
+                isbn: unambiguousISBN,
+                kind: .book
             )
         }
     }
