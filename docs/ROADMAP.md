@@ -59,9 +59,13 @@ cover to an EPUB that has none, and editing an EPUB's table of contents.
 
 `MetadataProvider` protocol per `ARCHITECTURE.md`. Order matters:
 
-1. **TMDB** (movies + TV) — the highest-value one, and the only provider that
-   needs a key. The key goes in the Keychain via a preferences pane, never in
-   the binary or the repo.
+1. ✅ **Done: TMDB** (movies + TV). `TagKey.tmdbID`, `TMDBKeyStore`
+   (Keychain), `TMDBClient` (movie/TV search, movie/show/episode detail,
+   season episode list), `TMDBProvider` behind `MetadataProvider`, a
+   Preferences pane (`⌘,`) for the key, and the wizard's `.episode` step for
+   picking a season/episode before a TV file's tag diff is built. Verified
+   against the real API and the developer's own Twin Peaks files (movie +
+   S01E01). See `docs/MOVIES_TV.md`.
 2. ✅ **Audnexus** (audiobooks) and **OpenLibrary** (books) — both done and
    behind `MetadataProvider`.
 3. **iTunes Search** (music, no key), MusicBrainz as fallback (1 req/s, real
