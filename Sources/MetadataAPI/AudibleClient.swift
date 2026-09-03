@@ -21,7 +21,9 @@ public struct AudibleClient: Sendable {
     public func search(_ query: MetadataQuery, limit: Int = 20) async throws -> [MetadataCandidate] {
         // An ASIN is an exact identifier, not a search term, so it is answered
         // before the query is judged empty — it carries no keywords by design.
-        if let asin = query.asin, !asin.isEmpty { return [try await product(asin: asin)] }
+        if let asin = query.asin, !asin.isEmpty {
+            return try await [product(asin: asin)]
+        }
         guard !query.isEmpty, !query.searchTerms.isEmpty else { throw MetadataError.emptyQuery }
 
         var components = URLComponents()
@@ -31,14 +33,14 @@ public struct AudibleClient: Sendable {
         var items = [
             URLQueryItem(name: "num_results", value: String(limit)),
             URLQueryItem(name: "response_groups", value: Self.responseGroups),
-            URLQueryItem(name: "image_sizes", value: "500,1024"),
+            URLQueryItem(name: "image_sizes", value: "500,1024")
         ]
         items.append(URLQueryItem(name: "keywords", value: query.searchTerms))
         components.queryItems = items
 
         guard let url = components.url else { throw MetadataError.malformedResponse("bad URL") }
         let (data, status) = try await transport.data(from: url)
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
 
         do {
             return try JSONDecoder.api.decode(SearchResponse.self, from: data).products.map(\.candidate)
@@ -55,11 +57,11 @@ public struct AudibleClient: Sendable {
         components.path = "/1.0/catalog/products/\(asin)"
         components.queryItems = [
             URLQueryItem(name: "response_groups", value: Self.responseGroups),
-            URLQueryItem(name: "image_sizes", value: "500,1024"),
+            URLQueryItem(name: "image_sizes", value: "500,1024")
         ]
         guard let url = components.url else { throw MetadataError.malformedResponse("bad URL") }
         let (data, status) = try await transport.data(from: url)
-        guard (200..<300).contains(status) else { throw MetadataError.server(status: status) }
+        guard (200 ..< 300).contains(status) else { throw MetadataError.server(status: status) }
         do {
             return try JSONDecoder.api.decode(ProductResponse.self, from: data).product.candidate
         } catch {
@@ -79,7 +81,9 @@ public struct AudibleClient: Sendable {
 
     private struct Product: Decodable {
         struct Person: Decodable { var name: String }
-        struct Series: Decodable { var title: String?; var sequence: String? }
+        struct Series: Decodable { var title: String?
+            var sequence: String?
+        }
 
         var asin: String
         var title: String
@@ -105,7 +109,8 @@ public struct AudibleClient: Sendable {
                 series: series?.first?.title,
                 seriesIndex: series?.first?.sequence.flatMap { Int($0) },
                 summary: merchandisingSummary.map(Self.strippingHTML),
-                artworkURL: Self.largestImage(productImages))
+                artworkURL: Self.largestImage(productImages)
+            )
         }
 
         /// Audible returns the image set keyed by pixel width, as strings.
