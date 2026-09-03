@@ -1,7 +1,7 @@
 import Foundation
-import Testing
 import MediaCore
 @testable import TagIO
+import Testing
 
 @Suite("AVTagReader", .serialized)
 struct AVTagReaderTests {
@@ -13,21 +13,34 @@ struct AVTagReaderTests {
         let m4a = dir.appending(path: "out.m4a")
 
         // 44.1kHz mono 16-bit silence, hand-built WAV header.
-        let frames = 22_050
+        let frames = 22050
         var data = Data()
-        func le(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        func le16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        data.append(contentsOf: Array("RIFF".utf8)); le(UInt32(36 + frames * 2))
-        data.append(contentsOf: Array("WAVEfmt ".utf8)); le(16); le16(1); le16(1)
-        le(44_100); le(88_200); le16(2); le16(16)
-        data.append(contentsOf: Array("data".utf8)); le(UInt32(frames * 2))
+        func le(_ v: UInt32) {
+            withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) }
+        }
+        func le16(_ v: UInt16) {
+            withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) }
+        }
+        data.append(contentsOf: Array("RIFF".utf8))
+        le(UInt32(36 + frames * 2))
+        data.append(contentsOf: Array("WAVEfmt ".utf8))
+        le(16)
+        le16(1)
+        le16(1)
+        le(44100)
+        le(88200)
+        le16(2)
+        le16(16)
+        data.append(contentsOf: Array("data".utf8))
+        le(UInt32(frames * 2))
         data.append(Data(count: frames * 2))
         try data.write(to: wav)
 
         let p = Process()
         p.executableURL = URL(filePath: "/usr/bin/afconvert")
         p.arguments = ["-f", "m4af", "-d", "aac", wav.path, m4a.path]
-        try p.run(); p.waitUntilExit()
+        try p.run()
+        p.waitUntilExit()
         #expect(p.terminationStatus == 0, "afconvert failed")
         return m4a
     }

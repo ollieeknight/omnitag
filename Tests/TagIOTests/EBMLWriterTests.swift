@@ -1,10 +1,10 @@
 import Foundation
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("EBMLWriter")
 struct EBMLWriterTests {
-    @Test("writes sizes as minimal-width VINTs that read back", arguments: [0, 1, 126, 127, 128, 16_382, 16_383, 100_000] as [Int])
+    @Test("writes sizes as minimal-width VINTs that read back", arguments: [0, 1, 126, 127, 128, 16382, 16383, 100_000] as [Int])
     func sizeRoundTrip(value: Int) throws {
         let bytes = EBMLWriter.size(value)
         var reader = EBMLReader(Data(bytes))

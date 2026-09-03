@@ -15,7 +15,7 @@ struct OPFDocument {
     static let opf = "http://www.idpf.org/2007/opf"
 
     struct Element {
-        var name: String              // local name, namespace stripped
+        var name: String // local name, namespace stripped
         var namespace: String?
         var attributes: [String: String]
         var text: String
@@ -88,7 +88,8 @@ struct OPFDocument {
     func replacingMetadata(with inner: String) throws -> Data {
         guard let open = Self.range(ofElement: "metadata", in: source) else {
             throw TagIOError.writeFailed(
-                URL(filePath: "content.opf"), "the OPF has no <metadata> element")
+                URL(filePath: "content.opf"), "the OPF has no <metadata> element"
+            )
         }
         var rebuilt = source
         rebuilt.replaceSubrange(open.inner, with: inner)
@@ -104,11 +105,11 @@ struct OPFDocument {
     static func range(ofElement name: String, in text: String)
         -> (whole: Range<String.Index>, inner: Range<String.Index>)? {
         guard let openStart = text.range(of: "<\(name)", options: [.caseInsensitive]),
-              let openEnd = text.range(of: ">", range: openStart.upperBound..<text.endIndex),
+              let openEnd = text.range(of: ">", range: openStart.upperBound ..< text.endIndex),
               let close = text.range(of: "</\(name)", options: [.caseInsensitive, .backwards]),
-              let closeEnd = text.range(of: ">", range: close.upperBound..<text.endIndex)
+              let closeEnd = text.range(of: ">", range: close.upperBound ..< text.endIndex)
         else { return nil }
-        return (openStart.lowerBound..<closeEnd.upperBound, openEnd.upperBound..<close.lowerBound)
+        return (openStart.lowerBound ..< closeEnd.upperBound, openEnd.upperBound ..< close.lowerBound)
     }
 
     /// XML text escaping — the five predefined entities, nothing clever.
@@ -138,7 +139,8 @@ private final class OPFParser: NSObject, XMLParserDelegate {
         guard parser.parse() else {
             throw TagIOError.unreadable(
                 URL(filePath: "content.opf"),
-                parser.parserError?.localizedDescription ?? "the OPF is not valid XML")
+                parser.parserError?.localizedDescription ?? "the OPF is not valid XML"
+            )
         }
     }
 
@@ -150,7 +152,8 @@ private final class OPFParser: NSObject, XMLParserDelegate {
 
         if depth.contains("metadata"), elementName != "metadata" {
             current = OPFDocument.Element(
-                name: elementName, namespace: namespaceURI, attributes: attributes, text: "")
+                name: elementName, namespace: namespaceURI, attributes: attributes, text: ""
+            )
         }
         if depth.contains("manifest"), elementName == "item",
            let id = attributes["id"], let href = attributes["href"] {
@@ -172,6 +175,8 @@ private final class OPFParser: NSObject, XMLParserDelegate {
             metadata.append(finished)
             current = nil
         }
-        if depth.last == elementName { depth.removeLast() }
+        if depth.last == elementName {
+            depth.removeLast()
+        }
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
-import Testing
 import MediaCore
 @testable import MetadataAPI
+import Testing
 
 struct ArtworkStubTransport: HTTPTransporting {
     let responseData: Data
@@ -18,7 +18,6 @@ struct ArtworkStubTransport: HTTPTransporting {
 
 @Suite("ArtworkDownloader")
 struct ArtworkDownloaderTests {
-    
     @Test("downloads image and detects JPEG")
     func downloadsJPEG() async throws {
         // A minimal valid JPEG magic byte sequence
@@ -26,14 +25,14 @@ struct ArtworkDownloaderTests {
         let data = Data(jpegBytes)
         let transport = ArtworkStubTransport(responseData: data, statusCode: 200, expectedURL: URL(string: "https://example.com/cover.jpg"))
         let downloader = ArtworkDownloader(transport: transport)
-        
-        let artwork = try await downloader.download(from: URL(string: "https://example.com/cover.jpg")!)
-        
+
+        let artwork = try await downloader.download(from: #require(URL(string: "https://example.com/cover.jpg")))
+
         #expect(artwork.data == data)
         #expect(artwork.mimeType == "image/jpeg")
         #expect(artwork.role == .cover)
     }
-    
+
     @Test("downloads image and detects PNG")
     func downloadsPNG() async throws {
         // PNG magic bytes
@@ -41,22 +40,22 @@ struct ArtworkDownloaderTests {
         let data = Data(pngBytes)
         let transport = ArtworkStubTransport(responseData: data, statusCode: 200, expectedURL: URL(string: "https://example.com/cover.png"))
         let downloader = ArtworkDownloader(transport: transport)
-        
-        let artwork = try await downloader.download(from: URL(string: "https://example.com/cover.png")!)
-        
+
+        let artwork = try await downloader.download(from: #require(URL(string: "https://example.com/cover.png")))
+
         #expect(artwork.data == data)
         #expect(artwork.mimeType == "image/png")
     }
-    
+
     @Test("throws on server error")
     func throwsServerError() async throws {
         let transport = ArtworkStubTransport(responseData: Data(), statusCode: 404, expectedURL: URL?(nil))
         let downloader = ArtworkDownloader(transport: transport)
-        
+
         do {
-            _ = try await downloader.download(from: URL(string: "https://example.com/missing.jpg")!)
+            _ = try await downloader.download(from: #require(URL(string: "https://example.com/missing.jpg")))
             Issue.record("Should have thrown")
-        } catch let MetadataError.server(status) {
+        } catch let MetadataError.server(status, _) {
             #expect(status == 404)
         } catch {
             Issue.record("Threw wrong error type: \(error)")

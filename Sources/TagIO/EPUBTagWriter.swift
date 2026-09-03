@@ -18,14 +18,14 @@ public struct EPUBTagWriter: Sendable {
     public func write(_ tags: TagSet, artwork: [Artwork] = [], to url: URL) throws {
         let archive = try ZipArchive(url: url)
         let opfPath = try EPUBReader.packagePath(in: archive, url: url)
-        let package = try OPFDocument(try archive.data(at: opfPath))
+        let package = try OPFDocument(archive.data(at: opfPath))
 
         if let backups {
             try backups.record(EPUBKeyMap.tags(from: package), for: url)
         }
 
-        var replacements: [String: Data] = [
-            opfPath: try package.replacingMetadata(with: EPUBKeyMap.metadataXML(for: tags, from: package))
+        var replacements: [String: Data] = try [
+            opfPath: package.replacingMetadata(with: EPUBKeyMap.metadataXML(for: tags, from: package))
         ]
 
         // A cover can only replace one that already exists: adding a new
@@ -48,13 +48,14 @@ public struct EPUBTagWriter: Sendable {
         // anything replaces the user's file.
         do {
             let verification = try ZipArchive(url: temporary)
-            let rewritten = try OPFDocument(try verification.data(at: opfPath))
+            let rewritten = try OPFDocument(verification.data(at: opfPath))
             let readBack = EPUBKeyMap.tags(from: rewritten)
             for key in EPUBKeyMap.managedKeys {
                 guard let intended = tags[key]?.stringValue, !intended.isEmpty else { continue }
                 guard readBack[key]?.stringValue == intended else {
                     throw TagIOError.writeFailed(
-                        url, "verification failed: \(key) read back as \(readBack[key]?.stringValue ?? "nothing")")
+                        url, "verification failed: \(key) read back as \(readBack[key]?.stringValue ?? "nothing")"
+                    )
                 }
             }
             guard verification.paths == archive.paths else {

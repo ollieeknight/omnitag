@@ -2,9 +2,9 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import MediaCore
+@testable import TagIO
 import Testing
 import UniformTypeIdentifiers
-@testable import TagIO
 
 @Suite("CoverImage")
 struct CoverImageTests {
@@ -14,13 +14,15 @@ struct CoverImageTests {
         let context = try #require(CGContext(
             data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
         context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: side, height: side))
         let image = try #require(context.makeImage())
         let output = NSMutableData()
         let destination = try #require(CGImageDestinationCreateWithData(
-            output, UTType.png.identifier as CFString, 1, nil))
+            output, UTType.png.identifier as CFString, 1, nil
+        ))
         CGImageDestinationAddImage(destination, image, nil)
         #expect(CGImageDestinationFinalize(destination))
         return output as Data
@@ -42,7 +44,7 @@ struct CoverImageTests {
 
     @Test("an oversized cover is resampled down when limit is given")
     func resamplesOversized() throws {
-        let prepared = try #require(CoverImage.prepared(try png(2400), maxPixels: 600))
+        let prepared = try #require(try CoverImage.prepared(png(2400), maxPixels: 600))
         #expect(try pixelWidth(prepared) == 600)
     }
 
@@ -68,12 +70,12 @@ struct CoverImageTests {
 
     @Test("the artwork it produces carries the MIME type of what it wrote")
     func artworkCarriesItsType() throws {
-        let small = try #require(CoverImage.artwork(from: try png(200)))
+        let small = try #require(try CoverImage.artwork(from: png(200)))
         #expect(small.mimeType == "image/png")
-        let full = try #require(CoverImage.artwork(from: try png(3000)))
+        let full = try #require(try CoverImage.artwork(from: png(3000)))
         #expect(full.mimeType == "image/png")
         #expect(full.role == .cover)
-        let resampled = try #require(CoverImage.artwork(from: try png(3000), maxPixels: 1400))
+        let resampled = try #require(try CoverImage.artwork(from: png(3000), maxPixels: 1400))
         #expect(resampled.mimeType == "image/jpeg")
     }
 }

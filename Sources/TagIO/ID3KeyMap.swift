@@ -15,24 +15,24 @@ enum ID3KeyMap {
         "TIT3": .subtitle,
         "TLAN": .language,
         "TPUB": .publisher,
-        "TYER": .year,        // ID3v2.3
-        "TDRC": .year,        // ID3v2.4 recording time
+        "TYER": .year, // ID3v2.3
+        "TDRC": .year, // ID3v2.4 recording time
         "TRCK": .trackNumber, // "3/12" — split on write-back
         "TPOS": .discNumber,
         "COMM": .comment,
         "TCMP": .compilation,
-        "TSOA": .custom("id3/TSOA"),
+        "TSOA": .custom("id3/TSOA")
     ]
 
     /// Frames whose value is `index/total`, an ID3 convention with no MPEG-4
     /// equivalent — the reader splits it across two keys.
     static let pairedFrames: [String: (index: TagKey, total: TagKey)] = [
         "TRCK": (.trackNumber, .trackTotal),
-        "TPOS": (.discNumber, .discTotal),
+        "TPOS": (.discNumber, .discTotal)
     ]
 
     static let numericKeys: Set<TagKey> = [
-        .year, .trackNumber, .trackTotal, .discNumber, .discTotal,
+        .year, .trackNumber, .trackTotal, .discNumber, .discTotal
     ]
 
     /// Frames OmniTag owns on write: everything else in a file is preserved
@@ -42,7 +42,7 @@ enum ID3KeyMap {
         ("TALB", .album), ("TCON", .genre), ("TCOM", .composer),
         ("TIT1", .grouping), ("TIT3", .subtitle), ("TLAN", .language),
         ("TPUB", .publisher), ("TDRC", .year),
-        ("TRCK", .trackNumber), ("TPOS", .discNumber), ("TCMP", .compilation),
+        ("TRCK", .trackNumber), ("TPOS", .discNumber), ("TCMP", .compilation)
     ]
 
     /// Frames replaced wholesale on write, so a stale value cannot linger.
@@ -52,7 +52,7 @@ enum ID3KeyMap {
 
     /// v2.3 spellings that v2.4 replaced. Dropped on write so a file never
     /// carries two answers to the same question.
-    static let supersededFrameIDs: Set<String> = ["TYER", "TDAT", "TIME", "TRDA"]
+    static let supersededFrameIDs: Set = ["TYER", "TDAT", "TIME", "TRDA"]
 
     private static let prefix = "id3/"
 
@@ -76,8 +76,12 @@ enum ID3KeyMap {
     /// A year frame may carry a full timestamp (`2017-05-02`); keep the year.
     static func value(_ string: String, for key: TagKey) -> TagValue {
         guard numericKeys.contains(key) else { return .string(string) }
-        if let n = Int(string) { return .number(n) }
-        if key == .year, let year = Int(string.prefix(4)) { return .number(year) }
+        if let n = Int(string) {
+            return .number(n)
+        }
+        if key == .year, let year = Int(string.prefix(4)) {
+            return .number(year)
+        }
         return .string(string)
     }
 }

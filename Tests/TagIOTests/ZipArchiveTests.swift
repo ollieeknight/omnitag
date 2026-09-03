@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("ZipArchive")
 struct ZipArchiveTests {
@@ -31,7 +31,7 @@ struct ZipArchiveTests {
         ("mimetype", Data("application/epub+zip".utf8)),
         ("META-INF/container.xml", Data("<container/>".utf8)),
         // Long and repetitive, so deflate actually has something to do.
-        ("ops/content.opf", Data(String(repeating: "<dc:title>Laura</dc:title>", count: 200).utf8)),
+        ("ops/content.opf", Data(String(repeating: "<dc:title>Laura</dc:title>", count: 200).utf8))
     ]
 
     @Test("an archive we write is readable by the system unzip, not just by us")
@@ -78,8 +78,8 @@ struct ZipArchiveTests {
         // A reader that only understands stored entries — as EPUB readers are
         // permitted to be for this one entry — must find it at a fixed offset.
         let bytes = try Data(contentsOf: url)
-        #expect(bytes[30..<38] == Data("mimetype".utf8))
-        #expect(bytes[38..<58] == Data("application/epub+zip".utf8))
+        #expect(bytes[30 ..< 38] == Data("mimetype".utf8))
+        #expect(bytes[38 ..< 58] == Data("application/epub+zip".utf8))
     }
 
     @Test("deflate actually compresses; stored entries do not grow")
@@ -141,6 +141,6 @@ struct ZipArchiveTests {
         #expect(status == 0, "\(output)")
 
         let archive = try ZipArchive(url: url)
-        #expect(try archive.data(at: "content.opf") == (try Data(contentsOf: payload)))
+        #expect(try archive.data(at: "content.opf") == Data(contentsOf: payload))
     }
 }

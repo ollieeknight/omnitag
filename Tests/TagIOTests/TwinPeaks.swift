@@ -29,8 +29,9 @@ enum TwinPeaks {
             .year: .number(1990),
             .trackNumber: .number(1),
             .trackTotal: .number(11),
-            .composer: .string("Angelo Badalamenti"),
-        ]))
+            .composer: .string("Angelo Badalamenti")
+        ])
+    )
 
     static let diary = Fixture(
         filename: "The Secret Diary of Laura Palmer.m4b",
@@ -43,13 +44,14 @@ enum TwinPeaks {
             .seriesIndex: .number(1),
             .publisher: .string("Simon & Schuster Audio"),
             .year: .number(1990),
-            .genre: .string("Fiction"),
+            .genre: .string("Fiction")
         ]),
         chapters: [
             Chapter(index: 0, start: 0, title: "July 22, 1984"),
             Chapter(index: 1, start: 0.2, title: "The Man Behind the Mask"),
-            Chapter(index: 2, start: 0.4, title: "February 23, 1989"),
-        ])
+            Chapter(index: 2, start: 0.4, title: "February 23, 1989")
+        ]
+    )
 
     static let fireWalkWithMe = Fixture(
         filename: "Twin Peaks Fire Walk with Me (1992).mp4",
@@ -61,8 +63,9 @@ enum TwinPeaks {
             .studio: .string("New Line Cinema"),
             .genre: .string("Mystery"),
             .contentRating: .string("R"),
-            .synopsis: .string("The last seven days of Laura Palmer."),
-        ]))
+            .synopsis: .string("The last seven days of Laura Palmer.")
+        ])
+    )
 
     static let northwestPassage = Fixture(
         filename: "Twin Peaks - S01E01 - Northwest Passage.mp4",
@@ -75,8 +78,9 @@ enum TwinPeaks {
             .title: .string("Northwest Passage"),
             .year: .number(1990),
             .director: .string("David Lynch"),
-            .genre: .string("Drama"),
-        ]))
+            .genre: .string("Drama")
+        ])
+    )
 
     static let all = [theme, diary, fireWalkWithMe, northwestPassage]
 
@@ -95,7 +99,7 @@ final class FixtureLibrary {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
-// deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { try? FileManager.default.removeItem(at: root) }
 
     /// Silent, tagless media of the right container, at `fixture.filename`.
     func makeUntagged(_ fixture: TwinPeaks.Fixture, seconds: Double = 0.6) throws -> URL {
@@ -122,15 +126,27 @@ final class FixtureLibrary {
     /// 44.1 kHz mono silence encoded to AAC in an MPEG-4 container. `afconvert`
     /// ships with macOS, so no fixture binaries live in the repo.
     private static func encodeSilence(seconds: Double, to destination: URL) throws {
-        let frames = Int(44_100 * seconds)
+        let frames = Int(44100 * seconds)
         let wav = destination.deletingPathExtension().appendingPathExtension("wav")
         var data = Data()
-        func le32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        func le16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        data.append(contentsOf: Array("RIFF".utf8)); le32(UInt32(36 + frames * 2))
-        data.append(contentsOf: Array("WAVEfmt ".utf8)); le32(16); le16(1); le16(1)
-        le32(44_100); le32(88_200); le16(2); le16(16)
-        data.append(contentsOf: Array("data".utf8)); le32(UInt32(frames * 2))
+        func le32(_ v: UInt32) {
+            withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) }
+        }
+        func le16(_ v: UInt16) {
+            withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) }
+        }
+        data.append(contentsOf: Array("RIFF".utf8))
+        le32(UInt32(36 + frames * 2))
+        data.append(contentsOf: Array("WAVEfmt ".utf8))
+        le32(16)
+        le16(1)
+        le16(1)
+        le32(44100)
+        le32(88200)
+        le16(2)
+        le16(16)
+        data.append(contentsOf: Array("data".utf8))
+        le32(UInt32(frames * 2))
         data.append(Data(count: frames * 2))
         try data.write(to: wav)
         defer { try? FileManager.default.removeItem(at: wav) }

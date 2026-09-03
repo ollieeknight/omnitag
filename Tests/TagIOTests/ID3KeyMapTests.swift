@@ -1,14 +1,14 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("ID3KeyMap")
 struct ID3KeyMapTests {
     @Test("maps the frames AVFoundation surfaces for mp3", arguments: [
         ("id3/TIT2", TagKey.title), ("id3/TPE1", .artist), ("id3/TALB", .album),
         ("id3/TYER", .year), ("id3/TRCK", .trackNumber), ("id3/TCON", .genre),
-        ("id3/TPE2", .albumArtist), ("id3/TCOM", .composer),
+        ("id3/TPE2", .albumArtist), ("id3/TCOM", .composer)
     ])
     func mapsKnownFrames(identifier: String, key: TagKey) {
         #expect(ID3KeyMap.key(forIdentifier: identifier) == key)

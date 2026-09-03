@@ -28,15 +28,17 @@ public enum CoverImage {
         guard let scaled = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: limit,
-            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
         ] as CFDictionary) else { return data }
 
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
-            output, UTType.jpeg.identifier as CFString, 1, nil) else { return data }
+            output, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return data }
         CGImageDestinationAddImage(
             destination, scaled,
-            [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+            [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        )
         guard CGImageDestinationFinalize(destination), output.length > 0 else { return data }
         return output as Data
     }

@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import MetadataAPI
+import Testing
 
 /// Opt-in checks against the real APIs: `OMNITAG_LIVE=1 make test`. Off by
 /// default so the suite stays offline, but these are what caught every wrong
@@ -61,7 +61,8 @@ struct LiveOpenLibraryTests {
 
         let results = try await provider.search(query, limit: 10)
         let match = try #require(
-            results.first { $0.title.localizedCaseInsensitiveContains("Secret Diary of Laura Palmer") })
+            results.first { $0.title.localizedCaseInsensitiveContains("Secret Diary of Laura Palmer") }
+        )
         #expect(match.authors.contains { $0.contains("Lynch") })
         #expect(match.id.hasPrefix("/works/"))
 
@@ -77,5 +78,43 @@ struct LiveOpenLibraryTests {
         let results = try await OpenLibraryProvider().search(query, limit: 5)
         #expect(!results.isEmpty, "OpenLibrary returned nothing for a broad query")
         #expect(results.contains { $0.artworkURL != nil }, "no cover ids came back")
+    }
+}
+
+/// Reads the key from `OMNITAG_TMDB_KEY`, never from Keychain — a live test
+/// must not depend on what happens to be saved in Preferences on this
+/// machine. `export OMNITAG_TMDB_KEY=...` before running; never committed.
+@Suite(
+    "TMDB, live",
+    .enabled(if: ProcessInfo.processInfo.environment["OMNITAG_LIVE"] == "1"
+        && ProcessInfo.processInfo.environment["OMNITAG_TMDB_KEY"] != nil)
+)
+struct LiveTMDBTests {
+    private var client: TMDBClient {
+        TMDBClient(apiKey: ProcessInfo.processInfo.environment["OMNITAG_TMDB_KEY"])
+    }
+
+    @Test("finds the real Fire Walk with Me and answers with the fields we map")
+    func findsTheRealMovie() async throws {
+        let results = try await client.searchMovies(.init(title: "Twin Peaks Fire Walk with Me"), limit: 5)
+        let match = try #require(results.first { $0.year == 1992 })
+
+        let record = try await client.movieDetails(id: match.id)
+        #expect(record.director?.contains("Lynch") == true)
+        #expect(record.tmdbID == match.id)
+    }
+
+    @Test("finds the real Twin Peaks show and its first episode")
+    func findsTheRealShowAndEpisode() async throws {
+        let results = try await client.searchTV(.init(title: "Twin Peaks"), limit: 5)
+        let match = try #require(results.first { $0.year == 1990 })
+
+        let episodes = try await client.seasonEpisodes(showID: match.id, season: 1)
+        #expect(!episodes.isEmpty)
+
+        let episode = try await client.episodeDetails(showID: match.id, showName: match.title, season: 1, episode: 1)
+        #expect(episode.showName == match.title)
+        #expect(episode.seasonNumber == 1)
+        #expect(episode.episodeNumber == 1)
     }
 }

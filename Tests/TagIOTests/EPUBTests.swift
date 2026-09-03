@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import TagIO
+import Testing
 
 /// Builds EPUBs through our own writer, the way `EBMLBuilder` builds Matroska:
 /// generated in the test, never committed.
@@ -45,15 +45,15 @@ enum EPUBBuilder {
     }
 
     static let ncx = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-        <docTitle><text>The Secret Diary of Laura Palmer</text></docTitle>
-        <navMap>
-        <navPoint id="n1"><navLabel><text>July 22, 1984</text></navLabel><content src="xhtml/ch01.html"/></navPoint>
-        <navPoint id="n2"><navLabel><text>July 23, 1984</text></navLabel><content src="xhtml/ch02.html"/></navPoint>
-        </navMap>
-        </ncx>
-        """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+    <docTitle><text>The Secret Diary of Laura Palmer</text></docTitle>
+    <navMap>
+    <navPoint id="n1"><navLabel><text>July 22, 1984</text></navLabel><content src="xhtml/ch01.html"/></navPoint>
+    <navPoint id="n2"><navLabel><text>July 23, 1984</text></navLabel><content src="xhtml/ch02.html"/></navPoint>
+    </navMap>
+    </ncx>
+    """
 
     /// A tiny but genuine JPEG, so cover reading exercises real bytes.
     static let coverJPEG = Data([0xFF, 0xD8, 0xFF, 0xE0] + [UInt8](repeating: 0x20, count: 64) + [0xFF, 0xD9])
@@ -62,15 +62,15 @@ enum EPUBBuilder {
         try ZipArchive.write([
             .init(path: "mimetype", data: Data("application/epub+zip".utf8)),
             .init(path: "META-INF/container.xml", data: Data("""
-                <?xml version="1.0"?>
-                <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-                <rootfiles><rootfile full-path="\(opfPath)" media-type="application/oebps-package+xml"/></rootfiles>
-                </container>
-                """.utf8)),
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+            <rootfiles><rootfile full-path="\(opfPath)" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+            """.utf8)),
             .init(path: opfPath, data: Data(opf.utf8)),
             .init(path: "ops/toc.ncx", data: Data(ncx.utf8)),
             .init(path: "ops/images/cover.jpg", data: coverJPEG),
-            .init(path: "ops/xhtml/ch01.html", data: Data("<html><body>Dear Diary</body></html>".utf8)),
+            .init(path: "ops/xhtml/ch01.html", data: Data("<html><body>Dear Diary</body></html>".utf8))
         ], to: url)
     }
 
@@ -87,7 +87,7 @@ struct EPUBReadingTests {
         let directory = try EPUBBuilder.temporaryDirectory()
         let url = directory.appending(path: "diary.epub")
         try EPUBBuilder.write(package: opf, to: url)
-        return (try EPUBReader().read(url), directory)
+        return try (EPUBReader().read(url), directory)
     }
 
     @Test("reads the Dublin Core fields a tagger cares about")
@@ -141,7 +141,8 @@ struct EPUBReadingTests {
             .replacingOccurrences(of: #"<meta content="my-cover-image" name="cover"/>"#, with: "")
             .replacingOccurrences(
                 of: #"<item href="images/cover.jpg" id="my-cover-image" media-type="image/jpeg"/>"#,
-                with: #"<item href="images/cover.jpg" id="c" media-type="image/jpeg" properties="cover-image"/>"#)
+                with: #"<item href="images/cover.jpg" id="c" media-type="image/jpeg" properties="cover-image"/>"#
+            )
         let (item, directory) = try book(opf)
         defer { try? FileManager.default.removeItem(at: directory) }
         #expect(item.artwork.first?.data == EPUBBuilder.coverJPEG)
@@ -150,9 +151,9 @@ struct EPUBReadingTests {
     @Test("calibre series metadata is read, because real libraries carry it")
     func readsCalibreSeries() throws {
         let opf = EPUBBuilder.package(extraMetadata: """
-            <meta name="calibre:series" content="Twin Peaks"/>
-            <meta name="calibre:series_index" content="1.0"/>
-            """)
+        <meta name="calibre:series" content="Twin Peaks"/>
+        <meta name="calibre:series_index" content="1.0"/>
+        """)
         let (item, directory) = try book(opf)
         defer { try? FileManager.default.removeItem(at: directory) }
         #expect(item.tags[.series]?.stringValue == "Twin Peaks")
@@ -236,7 +237,7 @@ struct EPUBWritingTests {
         try EPUBTagWriter().write(tags, to: url)
 
         let archive = try ZipArchive(url: url)
-        let opf = String(decoding: try archive.data(at: EPUBBuilder.opfPath), as: UTF8.self)
+        let opf = try String(decoding: archive.data(at: EPUBBuilder.opfPath), as: UTF8.self)
         #expect(opf.contains("private-thing"), "an unmanaged <meta> was dropped")
         #expect(opf.contains("must survive"))
         #expect(opf.contains("my-cover-image"), "the cover pointer was dropped")
@@ -252,7 +253,7 @@ struct EPUBWritingTests {
         try EPUBTagWriter().write(tags, to: url)
 
         let archive = try ZipArchive(url: url)
-        let opf = String(decoding: try archive.data(at: EPUBBuilder.opfPath), as: UTF8.self)
+        let opf = try String(decoding: archive.data(at: EPUBBuilder.opfPath), as: UTF8.self)
         #expect(opf.contains("<spine toc=\"ncx\">"))
         #expect(opf.contains("<item href=\"toc.ncx\" id=\"ncx\""))
         #expect(opf.contains("unique-identifier=\"bookid\""))
@@ -312,14 +313,15 @@ struct EPUBWritingTests {
         try ZipArchive.write([
             .init(path: "mimetype", data: Data("application/epub+zip".utf8)),
             .init(path: "META-INF/container.xml", data: Data("""
-                <container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>
-                """.utf8)),
-            .init(path: "c.opf", data: Data("<package><manifest/></package>".utf8)),
+            <container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>
+            """.utf8)),
+            .init(path: "c.opf", data: Data("<package><manifest/></package>".utf8))
         ], to: url)
         let before = try Data(contentsOf: url)
 
         #expect(throws: (any Error).self) {
-            var tags = TagSet(); tags.title = "Nope"
+            var tags = TagSet()
+            tags.title = "Nope"
             try EPUBTagWriter().write(tags, to: url)
         }
         #expect(try Data(contentsOf: url) == before)

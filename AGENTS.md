@@ -17,6 +17,7 @@ Read these before writing anything. They are short and they are current.
 | `docs/DISTRIBUTION.md` | Homebrew and signing |
 | `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the metadata wizard |
 | `docs/BOOKS.md` | EPUB and PDF, the zip writer, and the OpenLibrary provider |
+| `docs/MOVIES_TV.md` | TMDB provider, Keychain key storage, TV episode picker |
 | `docs/FILENAMES.md` | the `%field%` pattern language, renaming, and parsing names |
 
 "Read the docs and do X" means: those ten, then X. If X is not in the roadmap,
@@ -84,6 +85,10 @@ imports SwiftUI. An import that reverses this is a review-blocking change.
 
 ## Commands
 
+`test`/`build`/`run`/`lint`/`xcode`/`xcbuild`/`xctest` all regenerate
+`OmniTag.xcodeproj` first (fast, silent) — Xcode's index never shows a
+phantom "Cannot find X in scope" for a file you just added.
+
 ```sh
 make test      # swift test — must be green before you claim anything works
 make run       # launch the app
@@ -92,7 +97,13 @@ make xcbuild   # build the app target as Xcode does
 make xctest    # run the suite through the Xcode scheme
 make app       # assemble .build/OmniTag.app
 make install   # symlink it into /Applications
-make lint      # warnings-as-errors
+make lint      # warnings-as-errors, plus swiftformat --lint and swiftlint
+make format    # auto-fix formatting and lint violations (swiftformat, swiftlint --fix)
+make audit     # dead-code scan (periphery) — currently broken on this machine's
+               # toolchain, see .periphery.yml; swiftformat/swiftlint work fine
+make check     # lint + audit + test
+make hooks     # one-time per clone: enables git hooks that keep OmniTag.xcodeproj
+               # in sync after checkout/merge — see docs/DEVELOPMENT.md
 
 OMNITAG_REAL_MEDIA=~/Desktop/tp make test   # plus real-file assertions
 ```

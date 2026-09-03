@@ -21,11 +21,21 @@ struct EBMLReader {
         self.offset = offset
     }
 
-    var isAtEnd: Bool { offset >= data.count }
-    var remaining: Int { max(0, data.count - offset) }
+    var isAtEnd: Bool {
+        offset >= data.count
+    }
 
-    mutating func seek(to newOffset: Int) { offset = newOffset }
-    mutating func skip(_ count: Int) { offset += count }
+    var remaining: Int {
+        max(0, data.count - offset)
+    }
+
+    mutating func seek(to newOffset: Int) {
+        offset = newOffset
+    }
+
+    mutating func skip(_ count: Int) {
+        offset += count
+    }
 
     private mutating func byte() throws -> UInt8 {
         guard offset < data.count else { throw Failure.truncated }
@@ -44,7 +54,9 @@ struct EBMLReader {
         let first = try byte()
         let width = try Self.width(of: first)
         var value = UInt64(first)
-        for _ in 1..<width { value = value << 8 | UInt64(try byte()) }
+        for _ in 1 ..< width {
+            value = try value << 8 | UInt64(byte())
+        }
         return value
     }
 
@@ -55,7 +67,7 @@ struct EBMLReader {
         let width = try Self.width(of: first)
         var value = UInt64(first & (0xFF >> UInt8(width)))
         var allOnes = value == UInt64(0xFF >> UInt8(width))
-        for _ in 1..<width {
+        for _ in 1 ..< width {
             let next = try byte()
             allOnes = allOnes && next == 0xFF
             value = value << 8 | UInt64(next)
@@ -66,7 +78,9 @@ struct EBMLReader {
     mutating func readUInt(length: Int) -> UInt64? {
         guard length > 0, length <= 8, remaining >= length else { return nil }
         var value: UInt64 = 0
-        for _ in 0..<length { value = value << 8 | UInt64((try? byte()) ?? 0) }
+        for _ in 0 ..< length {
+            value = value << 8 | UInt64((try? byte()) ?? 0)
+        }
         return value
     }
 
@@ -83,7 +97,7 @@ struct EBMLReader {
         guard remaining >= length else { return nil }
         let start = data.startIndex + offset
         offset += length
-        let bytes = data[start..<(start + length)].prefix { $0 != 0 }
+        let bytes = data[start ..< (start + length)].prefix { $0 != 0 }
         return String(decoding: bytes, as: UTF8.self)
     }
 
@@ -91,6 +105,6 @@ struct EBMLReader {
         guard remaining >= length else { return nil }
         let start = data.startIndex + offset
         offset += length
-        return Data(data[start..<(start + length)])
+        return Data(data[start ..< (start + length)])
     }
 }

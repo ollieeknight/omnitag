@@ -9,12 +9,13 @@ public struct EPUBReader: Sendable {
     public func read(_ url: URL) throws -> MediaItem {
         let archive = try ZipArchive(url: url)
         let opfPath = try Self.packagePath(in: archive, url: url)
-        let package = try OPFDocument(try archive.data(at: opfPath))
+        let package = try OPFDocument(archive.data(at: opfPath))
 
         var item = MediaItem(
             url: url, kind: .book, container: .epub,
             tags: EPUBKeyMap.tags(from: package),
-            chapters: [], artwork: [])
+            chapters: [], artwork: []
+        )
 
         if let href = package.coverHref,
            let data = try? archive.data(at: Self.resolve(href, relativeTo: opfPath)) {
@@ -52,8 +53,11 @@ public struct EPUBReader: Sendable {
         // Collapse any "../" the href used to climb out of the package folder.
         var parts: [String] = []
         for component in joined.split(separator: "/", omittingEmptySubsequences: true) {
-            if component == ".." { parts.removeLast(parts.isEmpty ? 0 : 1) }
-            else if component != "." { parts.append(String(component)) }
+            if component == ".." {
+                parts.removeLast(parts.isEmpty ? 0 : 1)
+            } else if component != "." {
+                parts.append(String(component))
+            }
         }
         return parts.joined(separator: "/")
     }
@@ -73,7 +77,9 @@ enum TableOfContents {
         if let href = navHref,
            let data = try? archive.data(at: EPUBReader.resolve(href, relativeTo: opfPath)) {
             let titles = matches(of: #"<a[^>]*>([^<]+)</a>"#, in: String(decoding: data, as: UTF8.self))
-            if !titles.isEmpty { return chapters(from: titles) }
+            if !titles.isEmpty {
+                return chapters(from: titles)
+            }
         }
         if let href = ncxHref,
            let data = try? archive.data(at: EPUBReader.resolve(href, relativeTo: opfPath)) {

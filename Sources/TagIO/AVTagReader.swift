@@ -39,18 +39,30 @@ public struct AVTagReader: Sendable {
             } else if let (indexKey, totalKey) = MPEG4KeyMap.pairKeys(for: item) {
                 if let data = try? await item.load(.dataValue) {
                     let pair = MPEG4KeyMap.unpackPair(data)
-                    if let index = pair.index { tags[indexKey] = .number(index) }
-                    if let total = pair.total { tags[totalKey] = .number(total) }
+                    if let index = pair.index {
+                        tags[indexKey] = .number(index)
+                    }
+                    if let total = pair.total {
+                        tags[totalKey] = .number(total)
+                    }
                 }
             } else if let string = try? await item.load(.stringValue), !string.isEmpty {
                 apply(string, from: item, to: &tags)
             }
         }
 
-        return MediaItem(
+        if tags[.narrator] == nil, let composer = tags[.composer] {
+            tags[.narrator] = composer
+        }
+        if tags[.author] == nil, let author = tags[.albumArtist] ?? tags[.artist] {
+            tags[.author] = author
+        }
+
+        return await MediaItem(
             url: url, kind: container.defaultKind, container: container,
             duration: duration.isFinite ? duration : nil,
-            tags: tags, chapters: await Self.chapters(of: asset), artwork: artwork)
+            tags: tags, chapters: Self.chapters(of: asset), artwork: artwork
+        )
     }
 
     private func isArtwork(_ item: AVMetadataItem) -> Bool {
@@ -67,8 +79,12 @@ public struct AVTagReader: Sendable {
         if let frame = ID3KeyMap.frameID(fromIdentifier: raw) {
             if let pair = ID3KeyMap.pairedFrames[frame] {
                 let (index, total) = ID3KeyMap.split(string)
-                if let index { tags[pair.index] = .number(index) }
-                if let total { tags[pair.total] = .number(total) }
+                if let index {
+                    tags[pair.index] = .number(index)
+                }
+                if let total {
+                    tags[pair.total] = .number(total)
+                }
                 return
             }
             let key = ID3KeyMap.key(forIdentifier: raw)
@@ -86,18 +102,20 @@ public struct AVTagReader: Sendable {
     static func chapters(of asset: AVAsset) async -> [Chapter] {
         guard let locale = try? await asset.load(.availableChapterLocales).first,
               let groups = try? await asset.loadChapterMetadataGroups(
-                  withTitleLocale: locale, containingItemsWithCommonKeys: [])
+                  withTitleLocale: locale, containingItemsWithCommonKeys: []
+              )
         else { return [] }
 
         var chapters: [Chapter] = []
         for (index, group) in groups.enumerated() {
             let titleItem = group.items.first { $0.commonKey == .commonKeyTitle }
-            let title = (try? await titleItem?.load(.stringValue)) ?? nil
+            let title = await (try? titleItem?.load(.stringValue))
             chapters.append(Chapter(
                 index: index,
                 start: CMTimeGetSeconds(group.timeRange.start),
                 duration: CMTimeGetSeconds(group.timeRange.duration),
-                title: title ?? "Chapter \(index + 1)"))
+                title: title ?? "Chapter \(index + 1)"
+            ))
         }
         return chapters
     }

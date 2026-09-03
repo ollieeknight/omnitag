@@ -13,7 +13,9 @@ public struct TagBackupStore: Sendable {
 
     public let root: URL
 
-    public init(root: URL) { self.root = root }
+    public init(root: URL) {
+        self.root = root
+    }
 
     public static var `default`: TagBackupStore {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -31,13 +33,16 @@ public struct TagBackupStore: Sendable {
     public func history(for url: URL) -> [Entry] {
         let directory = root.appending(path: Self.slug(for: url))
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil)) ?? []
+            at: directory, includingPropertiesForKeys: nil
+        )) ?? []
         return files
             .compactMap { try? JSONDecoder().decode(Entry.self, from: Data(contentsOf: $0)) }
             .sorted { $0.date < $1.date }
     }
 
-    public func mostRecent(for url: URL) -> Entry? { history(for: url).last }
+    public func mostRecent(for url: URL) -> Entry? {
+        history(for: url).last
+    }
 
     /// Path-derived folder name. Collisions are harmless (entries carry their
     /// own URL), so a hash beats sanitising arbitrary path characters.

@@ -1,17 +1,16 @@
 import Foundation
-import Testing
 @testable import MediaCore
+import Testing
 
 @Suite("FilenamePattern")
 struct FilenamePatternTests {
-
     // MARK: - Parsing the pattern itself
 
     @Test("a pattern splits into literals and fields")
     func tokenises() {
         let pattern = FilenamePattern("%artist% - %title%")
         #expect(pattern.tokens == [
-            .field(.artist), .literal(" - "), .field(.title),
+            .field(.artist), .literal(" - "), .field(.title)
         ])
     }
 
@@ -108,7 +107,8 @@ struct FilenamePatternTests {
     @Test("a filename is parsed back into the fields the pattern names")
     func parsesFilename() throws {
         let tags = try #require(
-            FilenamePattern("%artist% - %title%").parse("Angelo Badalamenti - Laura Palmer's Theme"))
+            FilenamePattern("%artist% - %title%").parse("Angelo Badalamenti - Laura Palmer's Theme")
+        )
         #expect(tags.artist == "Angelo Badalamenti")
         #expect(tags.title == "Laura Palmer's Theme")
     }
@@ -116,7 +116,8 @@ struct FilenamePatternTests {
     @Test("counting fields parse as numbers, leading zeros dropped")
     func parsesNumbers() throws {
         let tags = try #require(
-            FilenamePattern("S%season%E%episode% - %title%").parse("S01E03 - Zen"))
+            FilenamePattern("S%season%E%episode% - %title%").parse("S01E03 - Zen")
+        )
         #expect(tags[.seasonNumber] == .number(1))
         #expect(tags[.episodeNumber] == .number(3))
         #expect(tags.title == "Zen")

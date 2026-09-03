@@ -12,19 +12,19 @@ public struct MatroskaReader: Sendable {
     public init() {}
 
     private enum ID {
-        static let ebmlHeader: UInt64 = 0x1A45DFA3
-        static let segment: UInt64 = 0x18538067
-        static let info: UInt64 = 0x1549A966
+        static let ebmlHeader: UInt64 = 0x1A45_DFA3
+        static let segment: UInt64 = 0x1853_8067
+        static let info: UInt64 = 0x1549_A966
         static let timestampScale: UInt64 = 0x2AD7B1
         static let duration: UInt64 = 0x4489
         static let title: UInt64 = 0x7BA9
-        static let chapters: UInt64 = 0x1043A770
+        static let chapters: UInt64 = 0x1043_A770
         static let editionEntry: UInt64 = 0x45B9
         static let chapterAtom: UInt64 = 0xB6
         static let chapterTimeStart: UInt64 = 0x91
         static let chapterDisplay: UInt64 = 0x80
         static let chapterString: UInt64 = 0x85
-        static let tags: UInt64 = 0x1254C367
+        static let tags: UInt64 = 0x1254_C367
         static let tag: UInt64 = 0x7373
         static let targets: UInt64 = 0x63C0
         static let targetTypeValue: UInt64 = 0x68CA
@@ -32,7 +32,7 @@ public struct MatroskaReader: Sendable {
         static let simpleTag: UInt64 = 0x67C8
         static let tagName: UInt64 = 0x45A3
         static let tagString: UInt64 = 0x4487
-        static let attachments: UInt64 = 0x1941A469
+        static let attachments: UInt64 = 0x1941_A469
         static let attachedFile: UInt64 = 0x61A7
         static let fileMimeType: UInt64 = 0x4660
         static let fileData: UInt64 = 0x465C
@@ -67,7 +67,9 @@ public struct MatroskaReader: Sendable {
 
         var tags = state.tags
         // The Segment title is a fallback: a real TITLE tag always wins.
-        if tags.title == nil { tags.title = state.segmentTitle }
+        if tags.title == nil {
+            tags.title = state.segmentTitle
+        }
 
         return MediaItem(
             url: url, kind: container.defaultKind, container: container,
@@ -76,10 +78,13 @@ public struct MatroskaReader: Sendable {
                 .enumerated().map { index, chapter in
                     var renumbered = chapter
                     renumbered.index = index
-                    if renumbered.title.isEmpty { renumbered.title = "Chapter \(index + 1)" }
+                    if renumbered.title.isEmpty {
+                        renumbered.title = "Chapter \(index + 1)"
+                    }
                     return renumbered
                 },
-            artwork: state.artwork)
+            artwork: state.artwork
+        )
     }
 
     private struct ParseState {
@@ -88,7 +93,7 @@ public struct MatroskaReader: Sendable {
         var artwork: [Artwork] = []
         var duration: TimeInterval?
         var segmentTitle: String?
-        var timestampScale: Double = 1_000_000  // nanoseconds per tick, Matroska's default
+        var timestampScale: Double = 1_000_000 // nanoseconds per tick, Matroska's default
         var rawDuration: Double?
     }
 
@@ -114,7 +119,7 @@ public struct MatroskaReader: Sendable {
             case ID.attachments, ID.attachedFile:
                 try walkAttachments(&reader, until: bodyEnd, into: &state)
             default:
-                reader.seek(to: bodyEnd)  // Clusters, Tracks, Cues, SeekHead: skipped whole
+                reader.seek(to: bodyEnd) // Clusters, Tracks, Cues, SeekHead: skipped whole
             }
             reader.seek(to: bodyEnd)
         }
@@ -133,7 +138,9 @@ public struct MatroskaReader: Sendable {
 
             switch elementID {
             case ID.timestampScale:
-                if let scale = reader.readUInt(length: size) { state.timestampScale = Double(scale) }
+                if let scale = reader.readUInt(length: size) {
+                    state.timestampScale = Double(scale)
+                }
             case ID.duration:
                 state.rawDuration = reader.readFloat(length: size)
             case ID.title:
@@ -206,7 +213,9 @@ public struct MatroskaReader: Sendable {
                   let size = try? reader.readSize().map({ Int($0) })
             else { return }
             let bodyEnd = reader.offset + size
-            if elementID == ID.tag { readTag(&reader, until: bodyEnd, into: &state) }
+            if elementID == ID.tag {
+                readTag(&reader, until: bodyEnd, into: &state)
+            }
             reader.seek(to: bodyEnd)
         }
     }
@@ -238,7 +247,9 @@ public struct MatroskaReader: Sendable {
                     }
                     // A tag aimed at a track describes the encoding, not the
                     // work: mkvmerge's BPS/NUMBER_OF_FRAMES statistics live here.
-                    if targetID == ID.tagTrackUID { isTrackScoped = true }
+                    if targetID == ID.tagTrackUID {
+                        isTrackScoped = true
+                    }
                     reader.seek(to: targetEnd)
                 }
             case ID.simpleTag:
@@ -249,11 +260,17 @@ public struct MatroskaReader: Sendable {
                           let fieldSize = try? reader.readSize().map({ Int($0) })
                     else { break }
                     let fieldEnd = reader.offset + fieldSize
-                    if fieldID == ID.tagName { name = reader.readString(length: fieldSize) }
-                    if fieldID == ID.tagString { value = reader.readString(length: fieldSize) }
+                    if fieldID == ID.tagName {
+                        name = reader.readString(length: fieldSize)
+                    }
+                    if fieldID == ID.tagString {
+                        value = reader.readString(length: fieldSize)
+                    }
                     reader.seek(to: fieldEnd)
                 }
-                if let name, let value, !value.isEmpty { pairs.append((name, value)) }
+                if let name, let value, !value.isEmpty {
+                    pairs.append((name, value))
+                }
             default:
                 break
             }
@@ -282,8 +299,12 @@ public struct MatroskaReader: Sendable {
                           let fieldSize = try? reader.readSize().map({ Int($0) })
                     else { break }
                     let fieldEnd = reader.offset + fieldSize
-                    if fieldID == ID.fileMimeType { mimeType = reader.readString(length: fieldSize) }
-                    if fieldID == ID.fileData { payload = reader.readData(length: fieldSize) }
+                    if fieldID == ID.fileMimeType {
+                        mimeType = reader.readString(length: fieldSize)
+                    }
+                    if fieldID == ID.fileData {
+                        payload = reader.readData(length: fieldSize)
+                    }
                     reader.seek(to: fieldEnd)
                 }
                 if let payload, let mimeType, mimeType.hasPrefix("image/") {

@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import TagIO
+import Testing
 
 /// Builds mkv files whose top-level layout we control, because the interesting
 /// cases are entirely about layout: does the new Tags element fit where the old
@@ -13,13 +13,13 @@ private func makeLayoutMKV(
     tagsAtEnd: Bool = false,
     seekHead: Bool = false
 ) throws -> URL {
-    let header = EBMLBuilder.element(0x1A45DFA3, EBMLBuilder.string(0x4282, "matroska"))
-    let info = EBMLBuilder.element(0x1549A966,
-        EBMLBuilder.uint(0x2AD7B1, 1_000_000)
-        + EBMLBuilder.double(0x4489, 5400 * 1000)
-        + EBMLBuilder.string(0x7BA9, "Northwest Passage"))
-    let cluster = EBMLBuilder.element(0x1F43B675, [UInt8](repeating: 0x42, count: clusterBytes))
-    let tagsElement = tags.isEmpty ? [] : EBMLBuilder.element(0x1254C367, tags.flatMap { $0 })
+    let header = EBMLBuilder.element(0x1A45_DFA3, EBMLBuilder.string(0x4282, "matroska"))
+    let info = EBMLBuilder.element(0x1549_A966,
+                                   EBMLBuilder.uint(0x2AD7B1, 1_000_000)
+                                       + EBMLBuilder.double(0x4489, 5400 * 1000)
+                                       + EBMLBuilder.string(0x7BA9, "Northwest Passage"))
+    let cluster = EBMLBuilder.element(0x1F43_B675, [UInt8](repeating: 0x42, count: clusterBytes))
+    let tagsElement = tags.isEmpty ? [] : EBMLBuilder.element(0x1254_C367, tags.flatMap(\.self))
     let padding = voidAfterTags > 0 ? (EBMLWriter.void(totalLength: voidAfterTags) ?? []) : []
 
     var body = info
@@ -27,15 +27,15 @@ private func makeLayoutMKV(
         // Real writers give SeekPosition a fixed 8-byte body so the value can be
         // rewritten later. The position is patched in once the file exists and
         // the true offset is known.
-        body = EBMLBuilder.element(0x114D9B74,
-            EBMLBuilder.element(0x4DBB,
-                EBMLBuilder.element(0x53AB, [0x12, 0x54, 0xC3, 0x67])
-                + EBMLBuilder.element(0x53AC, [UInt8](repeating: 0, count: 8)))) + body
+        body = EBMLBuilder.element(0x114D_9B74,
+                                   EBMLBuilder.element(0x4DBB,
+                                                       EBMLBuilder.element(0x53AB, [0x12, 0x54, 0xC3, 0x67])
+                                                           + EBMLBuilder.element(0x53AC, [UInt8](repeating: 0, count: 8)))) + body
     }
     body += tagsAtEnd ? cluster + tagsElement + padding : tagsElement + padding + cluster
 
     let file = URL.temporaryDirectory.appending(path: "\(UUID().uuidString).mkv")
-    try Data(header + EBMLBuilder.element(0x18538067, body)).write(to: file)
+    try Data(header + EBMLBuilder.element(0x1853_8067, body)).write(to: file)
 
     if seekHead {
         let layout = try structure(of: file)
@@ -52,8 +52,8 @@ private func patchSeekPosition(in url: URL, to position: Int) throws {
     let marker: [UInt8] = [0x53, 0xAC, 0x88]
     guard let range = data.range(of: Data(marker)) else { return }
     let start = range.upperBound
-    let bytes = (0..<8).reversed().map { UInt8((position >> (8 * $0)) & 0xFF) }
-    data.replaceSubrange(start..<(start + 8), with: bytes)
+    let bytes = (0 ..< 8).reversed().map { UInt8((position >> (8 * $0)) & 0xFF) }
+    data.replaceSubrange(start ..< (start + 8), with: bytes)
     try data.write(to: url)
 }
 
@@ -61,15 +61,17 @@ private func patchSeekPosition(in url: URL, to position: Int) throws {
 private func clusterPayload(of url: URL) throws -> [Data] {
     let data = try Data(contentsOf: url)
     var reader = EBMLReader(data)
-    _ = try reader.readElementID(); let headerSize = try reader.readSize()
+    _ = try reader.readElementID()
+    let headerSize = try reader.readSize()
     reader.skip(Int(headerSize ?? 0))
-    _ = try reader.readElementID(); _ = try reader.readSize()
+    _ = try reader.readElementID()
+    _ = try reader.readSize()
 
     var payloads: [Data] = []
     while !reader.isAtEnd {
         guard let id = try? reader.readElementID(), let size = try? reader.readSize() else { break }
         let length = Int(size ?? 0)
-        if id == 0x1F43B675, let body = reader.readData(length: length) {
+        if id == 0x1F43_B675, let body = reader.readData(length: length) {
             payloads.append(body)
         } else {
             reader.skip(length)
@@ -88,7 +90,7 @@ private struct Structure {
     var fileLength: Int
 
     var tagsElements: [(id: UInt64, offset: Int, totalLength: Int)] {
-        elements.filter { $0.id == 0x1254C367 }
+        elements.filter { $0.id == 0x1254_C367 }
     }
 
     /// The Segment must declare exactly the bytes that follow it.
@@ -117,14 +119,17 @@ private func structure(of url: URL) throws -> Structure {
     }
     return Structure(
         elements: elements, segmentBodyStart: bodyStart,
-        declaredSegmentSize: declared.map(Int.init), fileLength: data.count)
+        declaredSegmentSize: declared.map(Int.init), fileLength: data.count
+    )
 }
 
 @Suite("MatroskaTagWriter")
 struct MatroskaWriterTests {
     private func tagSet(_ pairs: [(TagKey, TagValue)]) -> TagSet {
         var tags = TagSet()
-        for (key, value) in pairs { tags[key] = value }
+        for (key, value) in pairs {
+            tags[key] = value
+        }
         return tags
     }
 
@@ -135,7 +140,8 @@ struct MatroskaWriterTests {
 
         try await MatroskaTagWriter().write(
             tagSet([(.title, .string("Northwest Passage")), (.director, .string("David Lynch"))]),
-            to: url)
+            to: url
+        )
 
         let read = try MatroskaReader().read(url)
         #expect(read.tags.title == "Northwest Passage")
@@ -146,13 +152,28 @@ struct MatroskaWriterTests {
         #expect(layout.segmentSizeIsCorrect, "an appended element must be inside the Segment")
     }
 
+    @Test("tmdbID round-trips like every other TMDB-sourced key")
+    func roundTripsTMDBID() async throws {
+        // MatroskaKeyMap.names had every other movie/TV key (.director, .studio,
+        // .contentRating, .showName via TITLE, ...) but not .tmdbID — writeName(for:)
+        // fell through to nil and the tag was silently dropped. Guards against
+        // regressing that fix.
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try await MatroskaTagWriter().write(tagSet([(.tmdbID, .string("603"))]), to: url)
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.tags[.tmdbID] == .string("603"))
+    }
+
     @Test("a smaller tag set is written in place, with the slack turned into padding")
     func shrinksInPlace() async throws {
         let url = try makeLayoutMKV(tags: [
             EBMLBuilder.tag(targetType: 50, [
                 EBMLBuilder.simpleTag("TITLE", String(repeating: "Long title. ", count: 20)),
-                EBMLBuilder.simpleTag("DIRECTOR", "David Lynch"),
-            ]),
+                EBMLBuilder.simpleTag("DIRECTOR", "David Lynch")
+            ])
         ])
         defer { try? FileManager.default.removeItem(at: url) }
         let sizeBefore = try Data(contentsOf: url).count
@@ -170,14 +191,16 @@ struct MatroskaWriterTests {
     func growsIntoAdjacentVoid() async throws {
         let url = try makeLayoutMKV(
             tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])],
-            voidAfterTags: 2048)
+            voidAfterTags: 2048
+        )
         defer { try? FileManager.default.removeItem(at: url) }
         let sizeBefore = try Data(contentsOf: url).count
         let clustersBefore = try clusterPayload(of: url)
 
         let long = String(repeating: "Wrapped in plastic. ", count: 40)
         try await MatroskaTagWriter().write(
-            tagSet([(.title, .string(long)), (.synopsis, .string(long))]), to: url)
+            tagSet([(.title, .string(long)), (.synopsis, .string(long))]), to: url
+        )
 
         #expect(try Data(contentsOf: url).count == sizeBefore, "the Void absorbs the growth")
         #expect(try clusterPayload(of: url) == clustersBefore)
@@ -187,7 +210,8 @@ struct MatroskaWriterTests {
     @Test("when there is no room, the old element becomes padding and the new one is appended")
     func relocatesWhenItCannotFit() async throws {
         let url = try makeLayoutMKV(
-            tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])])
+            tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])]
+        )
         defer { try? FileManager.default.removeItem(at: url) }
         let clustersBefore = try clusterPayload(of: url)
 
@@ -208,7 +232,8 @@ struct MatroskaWriterTests {
     func growsAtEndOfFile() async throws {
         let url = try makeLayoutMKV(
             tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])],
-            tagsAtEnd: true)
+            tagsAtEnd: true
+        )
         defer { try? FileManager.default.removeItem(at: url) }
         let clustersBefore = try clusterPayload(of: url)
 
@@ -227,7 +252,8 @@ struct MatroskaWriterTests {
     func patchesInPlace() async throws {
         let url = try makeLayoutMKV(
             tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])],
-            voidAfterTags: 2048)
+            voidAfterTags: 2048
+        )
         defer { try? FileManager.default.removeItem(at: url) }
         let inodeBefore = try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int
 
@@ -247,7 +273,7 @@ struct MatroskaWriterTests {
             (.seasonNumber, .number(1)),
             (.episodeNumber, .number(1)),
             (.title, .string("Northwest Passage")),
-            (.year, .number(1990)),
+            (.year, .number(1990))
         ]), to: url)
 
         let tags = try MatroskaReader().read(url).tags
@@ -262,7 +288,8 @@ struct MatroskaWriterTests {
     func repairsSeekHead() async throws {
         let url = try makeLayoutMKV(
             tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])],
-            seekHead: true)
+            seekHead: true
+        )
         defer { try? FileManager.default.removeItem(at: url) }
 
         let long = String(repeating: "Wrapped in plastic. ", count: 60)
@@ -276,7 +303,7 @@ struct MatroskaWriterTests {
         #expect(position == tags.offset - layout.segmentBodyStart,
                 "the SeekHead must point at where Tags actually moved to")
         var reader = EBMLReader(data, offset: layout.segmentBodyStart + position)
-        #expect(try reader.readElementID() == 0x1254C367)
+        #expect(try reader.readElementID() == 0x1254_C367)
         #expect(try MatroskaReader().read(url).tags.title == long)
     }
 
@@ -325,7 +352,9 @@ struct MatroskaWriterTests {
         while !reader.isAtEnd {
             guard let id = try? reader.readElementID(), let size = try? reader.readSize() else { break }
             let end = reader.offset + Int(size ?? 0)
-            guard id == 0x114D9B74 else { reader.seek(to: end); continue }
+            guard id == 0x114D_9B74 else { reader.seek(to: end)
+                continue
+            }
 
             while reader.offset < end {
                 guard let seekID = try? reader.readElementID(),
@@ -346,7 +375,9 @@ struct MatroskaWriterTests {
                             reader.skip(length)
                         }
                     }
-                    if isTags { return position }
+                    if isTags {
+                        return position
+                    }
                 }
                 reader.seek(to: seekEnd)
             }

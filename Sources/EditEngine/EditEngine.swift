@@ -17,11 +17,11 @@ public enum TagEdit: Sendable, Equatable {
     func applied(to tags: TagSet) -> TagSet {
         var result = tags
         switch self {
-        case .set(let key, let value):
+        case let .set(key, value):
             result[key] = value
-        case .clear(let key):
+        case let .clear(key):
             result[key] = nil
-        case .replace(let key, let find, let replacement):
+        case let .replace(key, find, replacement):
             guard let current = tags[key]?.stringValue, current.contains(find) else { return tags }
             result[key] = .string(current.replacingOccurrences(of: find, with: replacement))
         }
@@ -34,7 +34,7 @@ public enum RenameError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .destinationExists(let url):
+        case let .destinationExists(url):
             "A file called \(url.lastPathComponent) is already there."
         }
     }
@@ -111,9 +111,13 @@ public actor EditEngine {
         saved[item.url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
     }
 
-    public var allItems: [MediaItem] { order.compactMap { items[$0] } }
+    public var allItems: [MediaItem] {
+        order.compactMap { items[$0] }
+    }
 
-    public func item(at url: URL) -> MediaItem? { items[url] }
+    public func item(at url: URL) -> MediaItem? {
+        items[url]
+    }
 
     /// Items whose tags, artwork, or chapters differ from what is on disk.
     public var dirtyURLs: [URL] {
@@ -123,8 +127,13 @@ public actor EditEngine {
         }
     }
 
-    public var canUndo: Bool { !undoStack.isEmpty }
-    public var canRedo: Bool { !redoStack.isEmpty }
+    public var canUndo: Bool {
+        !undoStack.isEmpty
+    }
+
+    public var canRedo: Bool {
+        !redoStack.isEmpty
+    }
 
     public func apply(_ edit: TagEdit, to urls: [URL]) {
         var batch = Batch(before: [:], after: [:])
@@ -163,13 +172,14 @@ public actor EditEngine {
     /// written, so a selection of twenty parts of one book keeps its per-file
     /// titles and track numbers while gaining the author the provider supplied.
     /// Empty `artwork` means "the provider had none", never "delete the cover".
-    // ponytail: no way to clear a key through this path, because nothing in the
-    // wizard offers it. Add a `clearing: Set<TagKey>` argument when it does.
-    public func applySnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, to urls: [URL]) {
+    public func applySnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, clearing: Set<TagKey> = [], to urls: [URL]) {
         var batch = Batch(before: [:], after: [:])
         for url in urls {
             guard var item = items[url] else { continue }
             let beforeSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            for key in clearing {
+                item.tags[key] = nil
+            }
             for (key, value) in tags.values {
                 if let string = value.stringValue, string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     item.tags[key] = nil
@@ -177,8 +187,12 @@ public actor EditEngine {
                     item.tags[key] = value
                 }
             }
-            if !artwork.isEmpty { item.artwork = artwork }
-            if let chapters { item.chapters = chapters }
+            if !artwork.isEmpty {
+                item.artwork = artwork
+            }
+            if let chapters {
+                item.chapters = chapters
+            }
             let afterSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
             guard beforeSnap != afterSnap else { continue }
             batch.before[url] = beforeSnap
@@ -231,12 +245,12 @@ public actor EditEngine {
     private func prune(_ stack: [Step], dropping urls: Set<URL>) -> [Step] {
         stack.compactMap { step in
             switch step {
-            case .edit(let batch):
+            case let .edit(batch):
                 var kept = batch
                 kept.before = batch.before.filter { !urls.contains($0.key) }
                 kept.after = batch.after.filter { !urls.contains($0.key) }
                 return kept.after.isEmpty ? nil : .edit(kept)
-            case .rename(let moves):
+            case let .rename(moves):
                 let kept = moves.filter { !urls.contains($0.to) && !urls.contains($0.from) }
                 return kept.isEmpty ? nil : .rename(kept)
             }
@@ -268,7 +282,13 @@ public actor EditEngine {
         for (url, delta) in deltas {
             guard var item = items[url] else { continue }
             let beforeSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
-            for (key, value) in delta.values { item.tags[key] = value }
+            for (key, value) in delta.values {
+                if let string = value.stringValue, string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    item.tags[key] = nil
+                } else {
+                    item.tags[key] = value
+                }
+            }
             let afterSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
             guard beforeSnap != afterSnap else { continue }
             batch.before[url] = beforeSnap
@@ -308,11 +328,11 @@ public actor EditEngine {
                 failures.append(SaveFailure(url: step.from, error: error))
             }
         }
-        guard !done.isEmpty else { return RenameOutcome(renamed: 0, failures: failures) }
+        guard !done.isEmpty else { return RenameOutcome(renamed: 0, failures: failures, done: []) }
         remap(done)
         undoStack.append(.rename(done))
         redoStack.removeAll()
-        return RenameOutcome(renamed: done.count, failures: failures)
+        return RenameOutcome(renamed: done.count, failures: failures, done: done)
     }
 
     /// Replays moves that already succeeded once (undo and redo). A file the
@@ -335,13 +355,17 @@ public actor EditEngine {
     private func remap(_ moves: [RenameMove]) {
         guard !moves.isEmpty else { return }
         let table = Dictionary(moves.map { ($0.from, $0.to) }, uniquingKeysWith: { _, last in last })
-        func mapped(_ url: URL) -> URL { table[url] ?? url }
+        func mapped(_ url: URL) -> URL {
+            table[url] ?? url
+        }
 
         for (from, to) in table {
             guard var item = items.removeValue(forKey: from) else { continue }
             item.url = to
             items[to] = item
-            if let snap = saved.removeValue(forKey: from) { saved[to] = snap }
+            if let snap = saved.removeValue(forKey: from) {
+                saved[to] = snap
+            }
         }
         order = order.map(mapped)
         undoStack = rekey(undoStack, with: mapped)
@@ -351,14 +375,14 @@ public actor EditEngine {
     private func rekey(_ stack: [Step], with mapped: (URL) -> URL) -> [Step] {
         stack.map { step in
             switch step {
-            case .edit(var batch):
+            case var .edit(batch):
                 batch.before = Dictionary(batch.before.map { (mapped($0.key), $0.value) },
                                           uniquingKeysWith: { first, _ in first })
                 batch.after = Dictionary(batch.after.map { (mapped($0.key), $0.value) },
                                          uniquingKeysWith: { first, _ in first })
                 return .edit(batch)
-            case .rename(let moves):
-                return .rename(moves)
+            case let .rename(moves):
+                return .rename(moves.map { RenameMove(from: $0.from, to: mapped($0.to)) })
             }
         }
     }
@@ -366,8 +390,8 @@ public actor EditEngine {
     public func undo() {
         guard let step = undoStack.popLast() else { return }
         switch step {
-        case .edit(let batch): restore(batch.before)
-        case .rename(let moves): move(moves.map { RenameMove(from: $0.to, to: $0.from) })
+        case let .edit(batch): restore(batch.before)
+        case let .rename(moves): move(moves.map { RenameMove(from: $0.to, to: $0.from) })
         }
         redoStack.append(step)
     }
@@ -375,8 +399,8 @@ public actor EditEngine {
     public func redo() {
         guard let step = redoStack.popLast() else { return }
         switch step {
-        case .edit(let batch): restore(batch.after)
-        case .rename(let moves): move(moves)
+        case let .edit(batch): restore(batch.after)
+        case let .rename(moves): move(moves)
         }
         undoStack.append(step)
     }
@@ -407,14 +431,16 @@ public actor EditEngine {
         for url in pending {
             guard let item = items[url] else { continue }
             let snap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
-            let savedSnap = saved[url]
-            // Only pass chapters to the writer when they actually changed.
-            let chaptersChanged = savedSnap.map { $0.chapters != item.chapters } ?? !item.chapters.isEmpty
             do {
+                // Always hand over the chapters the item carries: an MPEG-4 tag
+                // write that skips them rebuilds the file without its chapter
+                // track. `nil` means "we have none", and the writer checks the
+                // file itself before believing it.
                 try await writer.write(
                     item.tags, artwork: item.artwork,
-                    chapters: chaptersChanged ? item.chapters : nil,
-                    to: url)
+                    chapters: item.chapters.isEmpty ? nil : item.chapters,
+                    to: url
+                )
                 saved[url] = snap
             } catch {
                 failures.append(SaveFailure(url: url, error: error))

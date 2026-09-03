@@ -1,7 +1,7 @@
 import Foundation
-import Testing
-import MediaCore
 @testable import LibraryIndex
+import MediaCore
+import Testing
 
 @Suite("LibraryScanner")
 struct ScannerTests {
@@ -11,7 +11,8 @@ struct ScannerTests {
         for name in names {
             let file = root.appending(path: name)
             try FileManager.default.createDirectory(
-                at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
             try Data().write(to: file)
         }
         return root
@@ -21,7 +22,7 @@ struct ScannerTests {
     func findsMedia() async throws {
         let root = try fixture([
             "Music/a.mp3", "Music/nested/b.flac", "Books/c.m4b",
-            "notes.txt", ".hidden/d.mp3", "Movies/e.mkv",
+            "notes.txt", ".hidden/d.mp3", "Movies/e.mkv"
         ])
         defer { try? FileManager.default.removeItem(at: root) }
 

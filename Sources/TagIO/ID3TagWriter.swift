@@ -33,7 +33,7 @@ public struct ID3TagWriter: Sendable {
                 throw TagIOError.writeFailed(url, "unsynchronised ID3 tags are not supported")
             }
             if let backups {
-                try backups.record(try ID3v2.tagSet(from: existing), for: url)
+                try backups.record(ID3v2.tagSet(from: existing), for: url)
             }
         }
 

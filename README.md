@@ -30,6 +30,7 @@ playable, then an atomic swap, with the previous tags archived to JSON first (mk
 | `docs/DEVELOPMENT.md` | build, test, Xcode, real-media testing |
 | `docs/AUDIOBOOKS.md` | Audible/Audnexus APIs, wizard, chapters, playback |
 | `docs/BOOKS.md` | EPUB/PDF, ZipArchive, OpenLibrary provider |
+| `docs/MOVIES_TV.md` | TMDB provider, Keychain key, episode picker |
 | `docs/FILENAMES.md` | the `%field%` pattern language, renaming, parsing names |
 | `docs/DISTRIBUTION.md` | Homebrew and code signing |
 

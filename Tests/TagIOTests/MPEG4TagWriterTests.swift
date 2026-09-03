@@ -1,13 +1,13 @@
 import Foundation
-import MediaCore
 import LibraryIndex
-import Testing
+import MediaCore
 @testable import TagIO
+import Testing
 
 @Suite("MPEG4TagWriter")
 struct MPEG4TagWriterTests {
     @Test("every Twin Peaks fixture survives a write/read round-trip",
-          arguments: TwinPeaks.all.filter { $0.container.isMPEG4Family })
+          arguments: TwinPeaks.all.filter(\.container.isMPEG4Family))
     func roundTrip(fixture: TwinPeaks.Fixture) async throws {
         let library = try FixtureLibrary()
         let url = try await library.makeTagged(fixture)

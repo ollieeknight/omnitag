@@ -1,13 +1,13 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("Synchsafe integers")
 struct SynchsafeTests {
     @Test("round-trips values either side of the 7-bit boundary",
-          arguments: [0, 1, 127, 128, 255, 256, 1024, 65_535, 268_435_455] as [Int])
-    func roundTrip(value: Int) throws {
+          arguments: [0, 1, 127, 128, 255, 256, 1024, 65535, 268_435_455] as [Int])
+    func roundTrip(value: Int) {
         let encoded = ID3v2.synchsafe(value)
         #expect(encoded.count == 4)
         #expect(encoded.allSatisfy { $0 < 0x80 }, "no byte may have its high bit set")
@@ -42,7 +42,7 @@ enum ID3Builder {
     }
 
     static func tag(version: UInt8 = 4, flags: UInt8 = 0, frames: [[UInt8]], padding: Int = 0) -> [UInt8] {
-        let body = frames.flatMap { $0 } + [UInt8](repeating: 0, count: padding)
+        let body = frames.flatMap(\.self) + [UInt8](repeating: 0, count: padding)
         return Array("ID3".utf8) + [version, 0x00, flags] + ID3v2.synchsafe(body.count) + body
     }
 
@@ -61,7 +61,7 @@ struct ID3v2ParseTests {
     func parsesFrames() throws {
         let bytes = ID3Builder.tag(frames: [
             ID3Builder.text("TIT2", "Twin Peaks Theme"),
-            ID3Builder.text("TPE1", "Angelo Badalamenti"),
+            ID3Builder.text("TPE1", "Angelo Badalamenti")
         ])
         let tag = try #require(ID3v2.parse(Data(bytes)))
         #expect(tag.frames.map(\.id) == ["TIT2", "TPE1"])
@@ -73,7 +73,7 @@ struct ID3v2ParseTests {
     func parsesVersion3() throws {
         let bytes = ID3Builder.tag(version: 3, frames: [
             ID3Builder.text("TIT2", "Twin Peaks Theme", synchsafeSize: false),
-            ID3Builder.text("TYER", "1990", synchsafeSize: false),
+            ID3Builder.text("TYER", "1990", synchsafeSize: false)
         ])
         let tag = try #require(ID3v2.parse(Data(bytes)))
         #expect(tag.version == 3)
@@ -87,7 +87,7 @@ struct ID3v2ParseTests {
         let long = String(repeating: "Wrapped in plastic. ", count: 20)
         let bytes = ID3Builder.tag(version: 3, frames: [
             ID3Builder.text("COMM", long, synchsafeSize: false),
-            ID3Builder.text("TIT2", "Northwest Passage", synchsafeSize: false),
+            ID3Builder.text("TIT2", "Northwest Passage", synchsafeSize: false)
         ])
         let tag = try #require(ID3v2.parse(Data(bytes)))
         #expect(tag.frames.map(\.id) == ["COMM", "TIT2"], "misread sizes shift every later frame")
@@ -107,9 +107,9 @@ struct ID3v2ParseTests {
     }
 
     @Test("decodes the text encodings real files use", arguments: [
-        ([0x00] + Array("Laura".utf8), "Laura"),            // ISO-8859-1
-        ([0x03] + Array("Laura".utf8), "Laura"),            // UTF-8
-        ([0x01, 0xFF, 0xFE, 0x4C, 0x00, 0x61, 0x00], "La"), // UTF-16 with BOM
+        ([0x00] + Array("Laura".utf8), "Laura"), // ISO-8859-1
+        ([0x03] + Array("Laura".utf8), "Laura"), // UTF-8
+        ([0x01, 0xFF, 0xFE, 0x4C, 0x00, 0x61, 0x00], "La") // UTF-16 with BOM
     ] as [([UInt8], String)])
     func decodesEncodings(payload: [UInt8], expected: String) {
         let frame = ID3v2.Frame(id: "TIT2", flags: [0, 0], payload: Data(payload))
@@ -120,7 +120,7 @@ struct ID3v2ParseTests {
 @Suite("ID3TagWriter")
 struct ID3TagWriterTests {
     private func read(_ url: URL) throws -> ID3v2.Tag {
-        try #require(ID3v2.parse(try Data(contentsOf: url)))
+        try #require(try ID3v2.parse(Data(contentsOf: url)))
     }
 
     @Test("writes the managed keys as v2.4 frames")
@@ -166,12 +166,13 @@ struct ID3TagWriterTests {
 
     @Test("audio bytes are never touched")
     func preservesAudio() async throws {
-        let audio = [0xFF, 0xFB, 0x90, 0x00] as [UInt8] + (0..<2048).map { UInt8($0 % 251) }
+        let audio = [0xFF, 0xFB, 0x90, 0x00] as [UInt8] + (0 ..< 2048).map { UInt8($0 % 251) }
         let url = ID3Builder.mp3(tag: ID3Builder.tag(frames: [ID3Builder.text("TIT2", "Before")]),
                                  audio: audio)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        var tags = TagSet(); tags.title = "After"
+        var tags = TagSet()
+        tags.title = "After"
         try await ID3TagWriter().write(tags, to: url)
 
         let data = try Data(contentsOf: url)
@@ -184,11 +185,12 @@ struct ID3TagWriterTests {
         let url = ID3Builder.mp3(tag: ID3Builder.tag(frames: [
             ID3Builder.text("TIT2", "Before"),
             ID3Builder.text("TMOO", "Ominous"),
-            ID3Builder.frame("PRIV", payload: [0x01, 0x02, 0x03]),
+            ID3Builder.frame("PRIV", payload: [0x01, 0x02, 0x03])
         ]))
         defer { try? FileManager.default.removeItem(at: url) }
 
-        var tags = TagSet(); tags.title = "After"
+        var tags = TagSet()
+        tags.title = "After"
         try await ID3TagWriter().write(tags, to: url)
 
         let written = try read(url)
@@ -200,11 +202,12 @@ struct ID3TagWriterTests {
     @Test("a v2.3 year frame becomes its v2.4 equivalent instead of both existing")
     func upgradesYearFrame() async throws {
         let url = ID3Builder.mp3(tag: ID3Builder.tag(version: 3, frames: [
-            ID3Builder.text("TYER", "1990", synchsafeSize: false),
+            ID3Builder.text("TYER", "1990", synchsafeSize: false)
         ]))
         defer { try? FileManager.default.removeItem(at: url) }
 
-        var tags = TagSet(); tags[.year] = .number(1990)
+        var tags = TagSet()
+        tags[.year] = .number(1990)
         try await ID3TagWriter().write(tags, to: url)
 
         let written = try read(url)
@@ -223,16 +226,17 @@ struct ID3TagWriterTests {
 
     @Test("refuses tag layouts it cannot rewrite safely instead of losing frames",
           arguments: [
-              (2 as UInt8, 0 as UInt8),     // v2.2: three-character frame ids
-              (4, 0x80),                    // unsynchronised
+              (2 as UInt8, 0 as UInt8), // v2.2: three-character frame ids
+              (4, 0x80) // unsynchronised
           ])
     func refusesUnsupportedTags(version: UInt8, flags: UInt8) async throws {
         let url = ID3Builder.mp3(tag: ID3Builder.tag(version: version, flags: flags, frames: [
-            ID3Builder.text("TIT2", "Before"),
+            ID3Builder.text("TIT2", "Before")
         ]))
         defer { try? FileManager.default.removeItem(at: url) }
 
-        var tags = TagSet(); tags.title = "After"
+        var tags = TagSet()
+        tags.title = "After"
         await #expect(throws: TagIOError.self) { try await ID3TagWriter().write(tags, to: url) }
     }
 
@@ -249,7 +253,8 @@ struct ID3TagWriterTests {
         }
 
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
-        var tags = TagSet(); tags.title = "After"
+        var tags = TagSet()
+        tags.title = "After"
         await #expect(throws: (any Error).self) { try await ID3TagWriter().write(tags, to: url) }
         #expect(try Data(contentsOf: url) == original)
     }

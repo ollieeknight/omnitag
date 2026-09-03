@@ -16,16 +16,46 @@ make xctest    # run the suite through the Xcode scheme
 Regenerating is safe and idempotent: `xcodegen generate` after any change to
 `project.yml` or after adding a module to `Package.swift`.
 
+### Xcode's index never needs a manual refresh
+
+`sources: - path: Sources/OmniTagApp` in `project.yml` already globs the
+whole directory — the project file was never missing new files
+structurally, it just goes stale on disk whenever one is added, removed, or
+renamed outside Xcode itself (which is most of how an agent works). Two
+things close that gap so you never have to remember `make xcode` yourself:
+
+- `make test`/`build`/`run`/`lint`/`xcode`/`xcbuild`/`xctest` all depend on
+  `sync-xcode`, which regenerates the project first — fast (well under a
+  second) and silent (`--quiet`).
+- **One-time setup**: `make hooks` enables this repo's versioned git hooks
+  (`.githooks/`, `core.hooksPath`), which regenerate the project after every
+  `git checkout`/`git pull`/`git merge` too — the one moment the Makefile
+  hooks above can't catch, since nothing ran a `make` target to trigger them.
+
+Run `make hooks` once after cloning. (This is a local `git config` setting,
+not something git applies automatically from a clone — each clone needs it
+once.)
+
 ## Command line
 
 ```sh
-make test      # swift test — the fast loop, 242 tests, ~1s
+make test      # swift test — the fast loop, 311 tests, ~1s
 make run       # swift run OmniTagApp
 make app       # assemble .build/OmniTag.app (ad-hoc signed)
 make install   # symlink that bundle into /Applications
-make lint      # warnings-as-errors build
+make lint      # warnings-as-errors build, plus swiftformat --lint and swiftlint
+make format    # auto-fix formatting and lint violations
+make audit     # dead-code scan (periphery) — see .periphery.yml if it errors
+make check     # lint + audit + test
+make hooks     # one-time: enable git hooks that auto-regenerate the Xcode project
 make clean
 ```
+
+`swiftformat`/`swiftlint` configs live at `.swiftformat`/`.swiftlint.yml`
+(repo root). `periphery` (`.periphery.yml`) is currently broken on this
+machine's Xcode 27 Beta toolchain — the SwiftPM build layout it needs an
+index store from doesn't produce one in the format periphery expects. Not a
+config problem; revisit when the toolchain leaves beta.
 
 ## Testing against real media
 

@@ -35,7 +35,7 @@ MediaCore        domain model + FilenamePattern, no I/O, no framework imports
                  beyond Foundation
 TagIO            MediaTagReader facade + per-format readers/writers + key maps
 LibraryIndex     folder scan and file typing (persistence: not built yet)
-MetadataAPI      protocol MetadataProvider + per-service clients (Audible, Audnexus, OpenLibrary)
+MetadataAPI      protocol MetadataProvider + per-service clients (Audible, Audnexus, OpenLibrary, TMDB)
 EditEngine       batch edit, undo/redo, save orchestration, backups, renaming
 OmniTagApp     SwiftUI executable
 ```
@@ -107,8 +107,8 @@ Per kind, an ordered provider list with fallback:
 - music: iTunes Search API (no key) → MusicBrainz (rate-limited, 1 req/s, UA required) — not built yet
 - audiobook: Audible (catalogue search, ASIN lookup) + Audnexus (ASIN-keyed detail, chapters) ✅
 - book: OpenLibrary (search, work/edition lookup) ✅
-- movie: TMDB — not built yet
-- tv: TMDB → TVmaze — not built yet
+- movie: TMDB (key via Keychain + preferences pane) ✅ — see `docs/MOVIES_TV.md`
+- tv: TMDB (show search → episode picker) ✅ → TVmaze if episode data proves thin — not built
 - Watchmode: skipped. "Where to watch" is streaming data; app is local-library scope. Not built.
 
 All clients sit behind `URLProtocol`-stubbed tests — no live network in CI.

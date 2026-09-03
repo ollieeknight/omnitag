@@ -42,11 +42,12 @@ public struct PDFReader: Sendable {
         guard let root = document.outlineRoot else { return [] }
         var chapters: [Chapter] = []
         func walk(_ node: PDFOutline) {
-            for index in 0..<node.numberOfChildren {
+            for index in 0 ..< node.numberOfChildren {
                 guard let child = node.child(at: index) else { continue }
                 if let label = child.label, !label.isEmpty {
                     chapters.append(Chapter(
-                        index: chapters.count, start: TimeInterval(chapters.count), title: label))
+                        index: chapters.count, start: TimeInterval(chapters.count), title: label
+                    ))
                 }
                 walk(child)
             }
@@ -61,7 +62,8 @@ public struct PDFReader: Sendable {
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         let scale = min(1, 600 / max(bounds.width, bounds.height))
         let image = page.thumbnail(
-            of: CGSize(width: bounds.width * scale, height: bounds.height * scale), for: .mediaBox)
+            of: CGSize(width: bounds.width * scale, height: bounds.height * scale), for: .mediaBox
+        )
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
         return bitmap.representation(using: .png, properties: [:])
@@ -75,7 +77,7 @@ public enum PDFKeyMap {
         (.authorAttribute, .author),
         (.subjectAttribute, .synopsis),
         (.keywordsAttribute, .genre),
-        (.creatorAttribute, .publisher),
+        (.creatorAttribute, .publisher)
     ]
 }
 
@@ -102,11 +104,12 @@ public struct PDFTagWriter: Sendable {
         }
         if Self.isSigned(document) {
             throw TagIOError.writeFailed(
-                url, "this PDF carries a digital signature, which any rewrite would invalidate")
+                url, "this PDF carries a digital signature, which any rewrite would invalidate"
+            )
         }
 
         if let backups {
-            try backups.record(try PDFReader().read(url).tags, for: url)
+            try backups.record(PDFReader().read(url).tags, for: url)
         }
 
         var attributes = document.documentAttributes ?? [:]
@@ -146,10 +149,10 @@ public struct PDFTagWriter: Sendable {
     /// A signature lives in an AcroForm signature field; PDFKit surfaces those
     /// as widget annotations with a signature field type.
     static func isSigned(_ document: PDFDocument) -> Bool {
-        for index in 0..<document.pageCount {
+        for index in 0 ..< document.pageCount {
             guard let page = document.page(at: index) else { continue }
             for annotation in page.annotations
-            where annotation.widgetFieldType == .signature {
+                where annotation.widgetFieldType == .signature {
                 return true
             }
         }

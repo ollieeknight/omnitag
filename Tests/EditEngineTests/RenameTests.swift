@@ -1,7 +1,7 @@
+@testable import EditEngine
 import Foundation
 import MediaCore
 import Testing
-@testable import EditEngine
 
 @Suite("Renaming files from tags")
 struct RenameTests {
@@ -181,8 +181,8 @@ struct RenameTests {
         await engine.apply(.set(.genre, .string("Soundtrack")), to: [item.url])
         await engine.rename(RenamePlan(items: [item], pattern: FilenamePattern("%title%")).moves)
 
-        await engine.undo()  // the rename
-        await engine.undo()  // the tag edit
+        await engine.undo() // the rename
+        await engine.undo() // the tag edit
 
         #expect(await engine.item(at: item.url)?.tags.genre == nil)
     }

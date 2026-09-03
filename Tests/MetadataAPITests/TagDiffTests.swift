@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import MetadataAPI
+import Testing
 
 @Suite("TagDiff")
 struct TagDiffTests {
@@ -9,7 +9,7 @@ struct TagDiffTests {
         .title: .string("The Secret Diary of Laura Palmer"),
         .author: .string("Jennifer Lynch"),
         .year: .number(2017),
-        .genre: .string("Fiction"),
+        .genre: .string("Fiction")
     ])
 
     private let providerTags = TagSet([
@@ -19,7 +19,7 @@ struct TagDiffTests {
         .year: .number(2017),
         .genre: .string("Literature & Fiction/Mystery, Thriller & Suspense"),
         .publisher: .string("Audible Studios"),
-        .asin: .string("B01M11U23O"),
+        .asin: .string("B01M11U23O")
     ])
 
     @Test("builds rows for every key present in either side")
@@ -52,46 +52,6 @@ struct TagDiffTests {
         #expect(narratorRow?.isChanged == true, "narrator is new from the provider")
     }
 
-    @Test("merge fills empty fields, does not overwrite existing")
-    func merge() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
-        let merged = diff.merged(into: fileTags)
-
-        // Existing fields are untouched.
-        #expect(merged.title == "The Secret Diary of Laura Palmer",
-                "merge must not overwrite an existing title")
-        #expect(merged[.genre] == .string("Fiction"),
-                "merge must not overwrite an existing genre")
-
-        // Empty fields are filled.
-        #expect(merged[.narrator] == .string("Sheryl Lee"))
-        #expect(merged[.publisher] == .string("Audible Studios"))
-        #expect(merged[.asin] == .string("B01M11U23O"))
-    }
-
-    @Test("overwrite-selected replaces only the ticked keys")
-    func overwriteSelected() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
-        let result = diff.overwriting([.title, .narrator], into: fileTags)
-
-        #expect(result.title == "The Secret Diary of Laura Palmer (Twin Peaks)",
-                "ticked key must be overwritten")
-        #expect(result[.narrator] == .string("Sheryl Lee"),
-                "ticked key must be written")
-        #expect(result[.genre] == .string("Fiction"),
-                "unticked key must be left alone")
-    }
-
-    @Test("overwrite-all replaces everything, dropping keys the provider lacks")
-    func overwriteAll() {
-        let diff = TagDiff(current: fileTags, proposed: providerTags, kind: .book)
-        let result = diff.overwriteAll()
-
-        #expect(result.title == "The Secret Diary of Laura Palmer (Twin Peaks)")
-        #expect(result[.narrator] == .string("Sheryl Lee"))
-        #expect(result[.genre] == .string("Literature & Fiction/Mystery, Thriller & Suspense"))
-    }
-
     @Test("an empty diff against identical tags has no changed rows")
     func identicalTagsProduceNoChanges() {
         let diff = TagDiff(current: fileTags, proposed: fileTags, kind: .book)
@@ -104,15 +64,62 @@ struct ChapterDiffTests {
     private let fileChapters: [Chapter] = [
         Chapter(index: 0, start: 0, duration: 120, title: "Opening Credits"),
         Chapter(index: 1, start: 120, duration: 300, title: "July 22, 1984"),
-        Chapter(index: 2, start: 420, duration: 250, title: "August 3, 1984"),
+        Chapter(index: 2, start: 420, duration: 250, title: "August 3, 1984")
     ]
 
     private let providerChapters: [Chapter] = [
         Chapter(index: 0, start: 0, duration: 125, title: "Chapter 1"),
         Chapter(index: 1, start: 125, duration: 305, title: "Chapter 2"),
         Chapter(index: 2, start: 430, duration: 255, title: "Chapter 3"),
-        Chapter(index: 3, start: 685, duration: 200, title: "Chapter 4"),
+        Chapter(index: 3, start: 685, duration: 200, title: "Chapter 4")
     ]
+
+    @Test("alignment keeps the file's timings and takes the provider's titles")
+    func alignedKeepsFileTimings() {
+        let rows = ChapterDiff(current: fileChapters, proposed: providerChapters).aligned().rows
+
+        #expect(rows.count == 3, "the file's chapter count wins — its timings are the real ones")
+        #expect(rows.map { $0.proposed?.title } == ["Chapter 1", "Chapter 2", "Chapter 3"])
+        #expect(rows.map { $0.proposed?.start } == [0, 120, 420])
+    }
+
+    @Test("a provider with fewer chapters leaves the unmatched titles alone")
+    func fileHasMore() {
+        let shortProvider = [Chapter(index: 0, start: 0, duration: 100, title: "Ch 1")]
+        let resolved = ChapterDiff(current: fileChapters, proposed: shortProvider).aligned().resolved
+
+        #expect(resolved.map(\.title) == ["Ch 1", "July 22, 1984", "August 3, 1984"])
+    }
+
+    @Test("an unchaptered file takes the provider's chapters outright")
+    func unchapteredTakesProviderTimings() {
+        let unchaptered = [Chapter(index: 0, start: 0, duration: 1000, title: "Book")]
+        let resolved = ChapterDiff(current: unchaptered, proposed: providerChapters).aligned().resolved
+
+        #expect(resolved.count == 4)
+        #expect(resolved[1].start == 125, "the provider's timing is imported")
+    }
+
+    @Test("seconds-long part markers never steal a chapter's title")
+    func partMarkersAreRefused() {
+        // The real shape of Flight of the Eisenstein: the file has 17 chapters and
+        // Audnexus adds two 5-second "Part" markers on top of chapters 8 and 14.
+        let file = [
+            Chapter(index: 0, start: 16536.94, duration: 2550, title: "07"),
+            Chapter(index: 1, start: 19086.95, duration: 2902, title: "08"),
+            Chapter(index: 2, start: 21989.07, duration: 2739, title: "09")
+        ]
+        let provider = [
+            Chapter(index: 0, start: 16577.19, duration: 2563, title: "Seven"),
+            Chapter(index: 1, start: 19140.26, duration: 4.7, title: "Part Two"),
+            Chapter(index: 2, start: 19145.03, duration: 2896, title: "Eight"),
+            Chapter(index: 3, start: 22042.10, duration: 2745, title: "Nine")
+        ]
+
+        let resolved = ChapterDiff(current: file, proposed: provider).aligned().resolved
+        #expect(resolved.map(\.title) == ["Seven", "Eight", "Nine"])
+        #expect(resolved.map(\.start) == file.map(\.start), "the file's timings are untouched")
+    }
 
     @Test("pairs chapters by index")
     func pairsByIndex() {
@@ -123,77 +130,13 @@ struct ChapterDiffTests {
         #expect(diff.rows[3].current == nil, "file has no chapter 4")
         #expect(diff.rows[3].proposed?.title == "Chapter 4")
     }
-
-    @Test("keep-mine preserves file titles and times, appends extras from provider")
-    func keepMine() {
-        let diff = ChapterDiff(current: fileChapters, proposed: providerChapters)
-        let result = diff.keepMine()
-
-        #expect(result[0].title == "Opening Credits")
-        #expect(result[0].start == 0)
-        #expect(result[2].title == "August 3, 1984")
-        // Extra chapter from provider is appended.
-        #expect(result.count == 4)
-        #expect(result[3].title == "Chapter 4")
-    }
-
-    @Test("take-theirs replaces everything with the provider's chapters")
-    func takeTheirs() {
-        let diff = ChapterDiff(current: fileChapters, proposed: providerChapters)
-        let result = diff.takeTheirs()
-
-        #expect(result.count == 4)
-        #expect(result[0].title == "Chapter 1")
-        #expect(result[0].start == 0)
-        #expect(result[1].start == 125)
-    }
-
-    @Test("keep my titles, take their times")
-    func keepTitlesTakeTimes() {
-        let diff = ChapterDiff(current: fileChapters, proposed: providerChapters)
-        let result = diff.keepTitlesTakeTimes()
-
-        #expect(result[0].title == "Opening Credits", "file's title kept")
-        #expect(result[0].start == 0, "provider's start time taken")
-        #expect(result[0].duration == 125, "provider's duration taken")
-        #expect(result[1].title == "July 22, 1984")
-        #expect(result[1].start == 125)
-        // Extra chapter beyond file's count takes provider's title too.
-        #expect(result[3].title == "Chapter 4")
-        #expect(result[3].start == 685)
-    }
-
-    @Test("handles file having more chapters than provider")
-    func fileHasMore() {
-        let shortProvider = [Chapter(index: 0, start: 0, duration: 100, title: "Ch 1")]
-        let diff = ChapterDiff(current: fileChapters, proposed: shortProvider)
-
-        #expect(diff.rows.count == 3, "covers the longer side — the file")
-        #expect(diff.rows[1].proposed == nil)
-        #expect(diff.rows[2].proposed == nil)
-
-        let result = diff.keepMine()
-        #expect(result.count == 3, "file's chapters kept in full")
-    }
-
-    @Test("rename pattern applies to all chapters")
-    func renamePattern() {
-        let chapters = fileChapters
-        let result = ChapterDiff.applyRenamePattern("Chapter %n%", to: chapters)
-        #expect(result[0].title == "Chapter 1")
-        #expect(result[1].title == "Chapter 2")
-        #expect(result[2].title == "Chapter 3")
-        // Times unchanged.
-        #expect(result[0].start == 0)
-        #expect(result[1].start == 120)
-    }
-
 }
 
 @Suite("TagDiff delta and quick actions")
 struct TagDiffDeltaTests {
     private func diff() -> TagDiff {
-        var current = TagSet(); current.title = "Old Title"
+        var current = TagSet()
+        current.title = "Old Title"
         var proposed = TagSet()
         proposed.title = "New Title"
         proposed[.author] = .string("Jennifer Lynch")
@@ -229,39 +172,31 @@ struct TagDiffDeltaTests {
     }
 }
 
-@Suite("ChapterDiff strategies rewrite the rows")
-struct ChapterDiffStrategyTests {
+@Suite("Alignment rewrites the editable rows")
+struct ChapterAlignmentTests {
     private let mine = [
         Chapter(index: 0, start: 0, title: "My One"),
-        Chapter(index: 1, start: 100, title: "My Two"),
+        Chapter(index: 1, start: 100, title: "My Two")
     ]
     private let theirs = [
         Chapter(index: 0, start: 5, duration: 95, title: "Their One"),
         Chapter(index: 1, start: 100, duration: 60, title: "Their Two"),
-        Chapter(index: 2, start: 160, duration: 40, title: "Their Three"),
+        Chapter(index: 2, start: 160, duration: 40, title: "Their Three")
     ]
 
-    @Test("keep-my-titles shows their times against my titles in the editable column")
-    func strategyIsVisibleInTheRows() {
-        let rows = ChapterDiff(current: mine, proposed: theirs)
-            .applying(.keepTitlesTakeTimes).rows
-        #expect(rows[0].proposed?.title == "My One")
-        #expect(rows[0].proposed?.start == 5)
-        #expect(rows[2].proposed?.title == "Their Three")
+    @Test("their titles sit against my times in the editable column")
+    func alignmentIsVisibleInTheRows() {
+        let rows = ChapterDiff(current: mine, proposed: theirs).aligned().rows
+        #expect(rows.count == 2, "the provider's extra chapter is not invented into the file")
+        #expect(rows[0].proposed?.title == "Their One")
+        #expect(rows[0].proposed?.start == 0, "file timestamp preserved")
     }
 
     @Test("a hand-edited title survives, because resolved reads the rows")
     func handEditsWin() {
-        var diff = ChapterDiff(current: mine, proposed: theirs).applying(.takeTheirs)
+        var diff = ChapterDiff(current: mine, proposed: theirs).aligned()
         diff.rows[0].proposed?.title = "Prologue"
-        #expect(diff.resolved[0].title == "Prologue")
-        #expect(diff.resolved.count == 3)
-    }
-
-    @Test("keep-mine trims the rows the strategy drops")
-    func keepMineTrims() {
-        let diff = ChapterDiff(current: mine, proposed: theirs).applying(.keepMine)
-        #expect(diff.resolved.map(\.title) == ["My One", "My Two", "Their Three"])
+        #expect(diff.resolved.map(\.title) == ["Prologue", "Their Two"])
     }
 }
 
@@ -302,7 +237,7 @@ struct ChapterBulkToolTests {
     private var diff: ChapterDiff {
         ChapterDiff(current: [], proposed: [
             Chapter(index: 0, start: 0, title: "Opening Credits"),
-            Chapter(index: 1, start: 30, title: "Chapter One"),
+            Chapter(index: 1, start: 30, title: "Chapter One")
         ])
     }
 
@@ -313,4 +248,52 @@ struct ChapterBulkToolTests {
         #expect(renamed.rows[0].current == nil)
     }
 
+    @Test("proximity title matching prevents off-by-one shifts when provider has extra part markers")
+    func proximityMatchingAvoidsOffByOne() {
+        // File has 3 chapters: Intro at 0s, Chapter 1 at 136s, Chapter 2 at 2090s
+        let file = [
+            Chapter(index: 0, start: 0, duration: 136, title: "Intro"),
+            Chapter(index: 1, start: 136, duration: 1954, title: "1"),
+            Chapter(index: 2, start: 2090, duration: 2000, title: "2")
+        ]
+        // Provider has 4 chapters: Opening Credits at 0s, Part One at 35s, One at 139s, Two at 2095s
+        let provider = [
+            Chapter(index: 0, start: 0, title: "Opening Credits"),
+            Chapter(index: 1, start: 35, title: "Part One: The Betrayer"),
+            Chapter(index: 2, start: 139, title: "One"),
+            Chapter(index: 3, start: 2095, title: "Two")
+        ]
+
+        let resolved = ChapterDiff(current: file, proposed: provider).aligned().resolved
+
+        // File timestamps must be preserved:
+        #expect(resolved[0].start == 0)
+        #expect(resolved[1].start == 136)
+        #expect(resolved[2].start == 2090)
+
+        // File chapter 1 (136s) must match provider chapter 2 ("One" at 139s), NOT "Part One" (at 35s)!
+        #expect(resolved[0].title == "Opening Credits")
+        #expect(resolved[1].title == "One")
+        #expect(resolved[2].title == "Two")
+    }
+
+    @Test("rich title detection distinguishes descriptive scene titles from generic numbers")
+    func richTitleDetection() {
+        let genericChapters = [
+            Chapter(index: 0, start: 0, title: "Opening"),
+            Chapter(index: 1, start: 100, title: "Chapter 1"),
+            Chapter(index: 2, start: 200, title: "Chapter 2"),
+            Chapter(index: 3, start: 300, title: "One"),
+            Chapter(index: 4, start: 400, title: "Two")
+        ]
+        #expect(ChapterDiff.hasRichTitles(genericChapters) == false)
+
+        let richChapters = [
+            Chapter(index: 0, start: 0, title: "Opening"),
+            Chapter(index: 1, start: 40, title: "Quotes"),
+            Chapter(index: 2, start: 80, title: "Blood from misunderstanding - Our brethren in ignorance"),
+            Chapter(index: 3, start: 1800, title: "Meeting the Invisibles - At the foot of a Golden Throne")
+        ]
+        #expect(ChapterDiff.hasRichTitles(richChapters) == true)
+    }
 }

@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import MetadataAPI
+import Testing
 
 /// Serves recorded API responses, so the suite is offline and deterministic.
 /// Recorded from the live APIs on 2026-08-31; re-record with `make fixtures`.
@@ -202,7 +202,7 @@ struct AudibleProviderTests {
     func searchThenDetails() async throws {
         let (service, _) = try service()
         let results = try await service.search(.init(keywords: "twin peaks"))
-        let details = try await service.details(for: try #require(results.first).id)
+        let details = try await service.details(for: #require(results.first).id)
 
         #expect(details.book.narrators == ["Sheryl Lee"])
         #expect(details.chapters.count == 6)
@@ -252,7 +252,8 @@ struct AudibleProviderTests {
         let service = AudibleProvider(region: .unitedStates, transport: transport)
 
         let outcome = try await service.searchWithRegion(
-            .init(title: "Secret Diary", author: "Jennifer Lynch"))
+            .init(title: "Secret Diary", author: "Jennifer Lynch")
+        )
 
         #expect(outcome.candidates.isEmpty == false)
         let attempts = transport.requestedURLs.compactMap { url in
@@ -266,7 +267,8 @@ struct AudibleProviderTests {
     func ranksByAuthor() async throws {
         let (service, _) = try service()
         let outcome = try await service.searchWithRegion(
-            .init(title: "twin peaks", author: "Mark Frost"))
+            .init(title: "twin peaks", author: "Mark Frost")
+        )
 
         #expect(outcome.candidates.first?.authors.contains("Mark Frost") == true)
     }
@@ -275,7 +277,7 @@ struct AudibleProviderTests {
           arguments: [
               "B01M11U23O",
               "https://www.audible.co.uk/pd/B01M11U23O",
-              "  https://www.audible.com/pd/The-Secret-Diary-Audiobook/B01M11U23O?ref=x  ",
+              "  https://www.audible.com/pd/The-Secret-Diary-Audiobook/B01M11U23O?ref=x  "
           ])
     func parsesPastedASIN(text: String) {
         #expect(MetadataQuery.asin(fromPastedText: text) == "B01M11U23O")

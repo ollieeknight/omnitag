@@ -1,32 +1,41 @@
 # Status
 
-Last updated: 2026-09-02. Update this file in the same commit as any change it
-describes — a stale STATUS is worse than none, because the next session trusts it.
+Last updated: 2026-09-03 (sixth movies/TV pass — kind-assignment design
+exploration, Finalist A shipped). Update this file in the same commit as any
+change it describes — a stale STATUS is worse than none, because the next
+session trusts it.
 
 ## Works today
 
 | Area | State |
 |---|---|
 | Domain model | `MediaCore`: `MediaItem`, `TagSet`, `TagKey`, `Chapter`, `Artwork`. Foundation only. |
-| Scanning | `LibraryScanner`: recursive walk, extension-typed, smart kind classifier (.m4b → audiobook, epub/pdf → book, SxxExx → TV), hidden files skipped. |
+| Scanning | `LibraryScanner`: recursive walk, extension-typed. The movie/TV/audiobook/book classifier is `LibraryModel.detectKind` in `App.swift` (not the scanner itself) — SxxExx pattern → TV, everything else video → movie, `.m4b` → audiobook, epub/pdf → book. Never trusts which sidebar tab is active for the movie-vs-TV decision, so a mixed folder scanned from any tab still lands correctly. Hidden files skipped. |
 | Reading | `MediaTagReader` routes by container: AVFoundation for MPEG-4/mp3/wav/aiff, `MatroskaReader` for mkv, `EPUBReader` for epub, `PDFReader` for pdf. |
 | Writing | `MediaTagWriter` routes: `MPEG4TagWriter` (MP4 family), `ID3TagWriter` (mp3), `MatroskaTagWriter` (mkv), `EPUBTagWriter` (epub), `PDFTagWriter` (pdf). |
 | ID3 | Read **and** write. Writes v2.4/UTF-8, preserves unmanaged frames, `3/12` split. |
-| MPEG-4 | Read **and** write. Standard atoms (`©nam`, `tvsh`, `trkn`…) plus freeform `----` for SERIES/ASIN/STUDIO. |
+| MPEG-4 | Read **and** write. Standard atoms (`©nam`, `tvsh`, `trkn`…), freeform `----` (mean-agnostic, case-insensitive, Libation/Tone/Mp3tag compat), `itsk/asin`, and narrator/author read fallbacks. |
 | Matroska | Read **and** write. Tags written by in-place patch — the file is never copied. |
-| Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Editable in-place in Inspector and in Metadata Wizard. |
+| Chapters | Read for m4b/mp4 (chapter groups) and mkv (ChapterAtom). Written for the MP4 family by `MPEG4ChapterWriter`. Edited in the inspector's chapter list and reconciled with a provider in the wizard. |
 | Playback | Audio preview via `AVPlayer` (m4b, m4a, mp3, wav, aiff, flac) with scrubber and playhead chapter insertion. |
 | Artwork | Original image resolution preserved by default; local artwork auto-discovery (`cover.jpg`) and clipboard paste (`⌘V`). |
 | Writing safety | Stage to sibling temp → re-read to verify → atomic `replaceItemAt`. Previous tags archived as JSON. |
 | Editing | `EditEngine`: batch `set`/`clear`/`replace`/`setKind`/`applyChapters` over a selection, undo/redo per batch, save only dirty files. `applySnapshot` writes the wizard's result as a **delta**. |
-| UI | Three panes: kind sidebar with drop-reassignment; sortable, column-customisable table with covers and unsaved marks; batch inspector with in-place chapter studio and audio transport bar. |
+| UI | Three panes: kind sidebar with drop-reassignment and a per-kind item count badge (so a mixed folder scan never looks like files vanished — they're just filed under another tab); sortable, column-customisable table with covers and unsaved marks; batch inspector with a Kind picker (explains itself via `kindGuessReason` when a video file's classification was a guess, not a fact), an editable chapter list, and audio transport bar. `LibraryModel.visible` is cached against every input it depends on (was recomputing the whole filter/sort on every redraw); cover thumbnails are decoded once per distinct image via `ThumbnailCache`, not once per cell redraw. |
 | Books | EPUB read **and** write via a hand-rolled `ZipArchive`; OPF edited surgically, other entries copied compressed. PDF read and write via PDFKit. See `BOOKS.md`. |
-| Metadata providers | `MetadataProvider` protocol. Audible + Audnexus for audiobooks, OpenLibrary for books. The wizard is provider-driven and serves both tabs. |
+| Metadata providers | `MetadataProvider` protocol. Audible + Audnexus for audiobooks, OpenLibrary for books, TMDB for movies + TV (key via Keychain/Preferences, `⌘,`). The wizard is provider-driven; a TV search result is a show, so the wizard adds an episode-picker step before building the tag diff. `MetadataProvider.hasEpisodePicker` names this behaviour rather than the wizard checking for `TMDBProvider` by concrete type. See `MOVIES_TV.md`. |
+| Wizard test coverage | `OmniTagAppTests` (new): `MetadataWizardModel.buildSnapshot()`, the mkv-artwork skip, the multi-file chapter/episode guards, and TV show-vs-episode routing, all driven against a fake `MetadataProvider` — no network, no view rendering. |
 | Filenames | `FilenamePattern` renders tags into a name and parses a name back into tags. Rename sheet with live preview, presets, collision and missing-field refusals; renames are undoable. See `FILENAMES.md`. |
-| Tests | 242, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
+| Tests | 311, no network. Real media under `OMNITAG_REAL_MEDIA`, live APIs under `OMNITAG_LIVE`. |
 
 ## Does not work yet
 
+- **The wizard's movie-vs-TV choice does not write back to a file's kind.**
+  `MetadataWizardModel.kind` is frozen at whatever the sidebar tab was when
+  the wizard opened; a file can leave the wizard tagged with TV-shaped
+  fields while the sidebar still files it under Movie. Planned as
+  "Finalist B" in `docs/MOVIES_TV.md`'s "Sixth pass", with a concrete
+  implementation plan — not started.
 - **flac, ogg/opus.** Scanned and listed, not parsed at all.
 - **MOBI/AZW3 and CBZ.** Out of scope for now; considered and deferred.
 - **An EPUB table of contents is read-only**, and an EPUB cover can be replaced
@@ -35,9 +44,10 @@ describes — a stale STATUS is worse than none, because the next session trusts
   Encrypted and digitally-signed PDFs are refused on write.
 - **mkv chapters and attachments are read-only.** Only the `Tags` element is
   written; editing chapters means the same patch machinery applied to `Chapters`.
-- **Metadata providers.** Audiobooks (Audible + Audnexus) and books
-  (OpenLibrary) done. TMDB, TVmaze, iTunes and MusicBrainz not started — the
-  wizard button is disabled on tabs no provider serves.
+- **Metadata providers.** Audiobooks (Audible + Audnexus), books
+  (OpenLibrary), and movies/TV (TMDB) done — see `docs/MOVIES_TV.md`.
+  TVmaze, iTunes and MusicBrainz not started — the wizard button is
+  disabled on tabs no provider serves (music, still).
 - **Artwork beyond one cover.** One `.cover` image per file: drop, choose,
   find in folder, paste, remove. Backdrops and multiple roles are
   modelled but not editable.
@@ -55,8 +65,6 @@ step.
 - `ZipArchive` reads a whole archive into memory (`ponytail:` marked). Fine at
   book sizes; a 300 MB illustrated EPUB would want a `FileHandle`.
 
-- `visible` filters and sorts on every read and the table reads it several times
-  per redraw (`ponytail:` marked in `App.swift`). Fine for hundreds.
 - Removing files from the library purges their undo history — it is the one
   action in the app that cannot be undone, so it asks first when edits are
   pending.
@@ -85,11 +93,19 @@ step.
 - `MPEG4TagWriter` still rewrites through `AVAssetExportSession`, so tagging a
   large mp4 costs a full re-mux. Matching the mkv approach (patch the `moov`
   atom) is a worthwhile follow-up, not yet scheduled.
+- **A passthrough export drops the chapter track**, verified against a real m4b,
+  so any MPEG-4 file that has chapters is written by `MPEG4ChapterWriter`
+  instead — even when only a title changed. It copies the audio without
+  re-encoding: a 234 MB, 10.7-hour audiobook takes about 1.2 seconds.
+- `MPEG4ChapterWriter` keeps the first audio track and nothing else, so a file
+  with a second audio or video track loses it. No audiobook has one.
+- The Nero `chpl` atom some taggers write alongside the chapter track is not
+  reproduced. Every player that matters reads the chapter track.
 
 ## Verify the claims above
 
 ```sh
-make test                                   # 242 tests
+make test                                   # 311 tests
 OMNITAG_REAL_MEDIA=~/Desktop/tp make test   # plus real-file assertions
 OMNITAG_LIVE=1 make test                    # plus live Audible/Audnexus checks
 make xctest                                 # same suite through the Xcode scheme

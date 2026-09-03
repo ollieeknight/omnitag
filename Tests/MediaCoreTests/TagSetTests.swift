@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import MediaCore
+import Testing
 
 @Suite("TagSet")
 struct TagSetTests {
@@ -22,18 +22,47 @@ struct TagSetTests {
 
     @Test("diff reports only changed keys")
     func diff() {
-        var before = TagSet(); before.title = "a"; before.artist = "x"
-        var after = before; after.title = "b"
+        var before = TagSet()
+        before.title = "a"
+        before.artist = "x"
+        var after = before
+        after.title = "b"
         #expect(before.changedKeys(to: after) == [.title])
     }
 
     @Test("merging many items marks conflicting fields as mixed")
     func mixedValues() {
-        var a = TagSet(); a.album = "One"; a.artist = "Miles"
-        var b = TagSet(); b.album = "Two"; b.artist = "Miles"
+        var a = TagSet()
+        a.album = "One"
+        a.artist = "Miles"
+        var b = TagSet()
+        b.album = "Two"
+        b.artist = "Miles"
         let common = TagSet.common(of: [a, b])
         #expect(common[.artist] == .string("Miles"))
         #expect(common[.album] == nil)
+    }
+
+    @Test("tmdbID round-trips like asin and isbn")
+    func tmdbIDRoundTrips() {
+        var tags = TagSet()
+        tags[.tmdbID] = .string("603")
+        #expect(tags[.tmdbID] == .string("603"))
+    }
+}
+
+@Suite("TagKey.standardFields")
+struct StandardFieldsTests {
+    @Test("movie fields include the TMDB id")
+    func movieHasTmdbID() {
+        let keys = TagKey.standardFields(for: .movie).map(\.key)
+        #expect(keys.contains(.tmdbID))
+    }
+
+    @Test("tvEpisode fields include the TMDB id")
+    func tvEpisodeHasTmdbID() {
+        let keys = TagKey.standardFields(for: .tvEpisode).map(\.key)
+        #expect(keys.contains(.tmdbID))
     }
 }
 
@@ -43,7 +72,7 @@ struct ContainerFormatTests {
         ("song.MP3", ContainerFormat.mp3, MediaKind.music),
         ("book.m4b", .m4b, .audiobook),
         ("film.mkv", .mkv, .movie),
-        ("track.flac", .flac, .music),
+        ("track.flac", .flac, .music)
     ])
     func classify(name: String, format: ContainerFormat, kind: MediaKind) {
         let f = ContainerFormat(pathExtension: URL(filePath: name).pathExtension)

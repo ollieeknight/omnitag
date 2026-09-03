@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("EBML primitives")
 struct EBMLTests {
@@ -8,15 +8,18 @@ struct EBMLTests {
     struct Case: Sendable {
         var bytes: [UInt8]
         var expected: UInt64
-        init(_ bytes: [UInt8], _ expected: UInt64) { self.bytes = bytes; self.expected = expected }
+        init(_ bytes: [UInt8], _ expected: UInt64) {
+            self.bytes = bytes
+            self.expected = expected
+        }
     }
 
     @Test("decodes element IDs, keeping the marker bit that identifies them",
           arguments: [
-              Case([0x1A, 0x45, 0xDF, 0xA3], 0x1A45DFA3),  // EBML header
-              Case([0x18, 0x53, 0x80, 0x67], 0x18538067),  // Segment
-              Case([0x42, 0x86], 0x4286),                  // EBMLVersion
-              Case([0xA3], 0xA3),                          // SimpleBlock
+              Case([0x1A, 0x45, 0xDF, 0xA3], 0x1A45_DFA3), // EBML header
+              Case([0x18, 0x53, 0x80, 0x67], 0x1853_8067), // Segment
+              Case([0x42, 0x86], 0x4286), // EBMLVersion
+              Case([0xA3], 0xA3) // SimpleBlock
           ])
     func decodesElementID(_ testCase: Case) throws {
         var reader = EBMLReader(Data(testCase.bytes))
@@ -28,7 +31,7 @@ struct EBMLTests {
               Case([0x82], 2),
               Case([0x40, 0x02], 2),
               Case([0x20, 0x00, 0x02], 2),
-              Case([0x41, 0xF4], 500),
+              Case([0x41, 0xF4], 500)
           ])
     func decodesSize(_ testCase: Case) throws {
         var reader = EBMLReader(Data(testCase.bytes))
@@ -42,13 +45,13 @@ struct EBMLTests {
     }
 
     @Test("reads unsigned integers of any width")
-    func readsUInt() throws {
+    func readsUInt() {
         var reader = EBMLReader(Data([0x01, 0x00, 0x00]))
         #expect(reader.readUInt(length: 3) == 65536)
     }
 
     @Test("reads floats in both widths")
-    func readsFloat() throws {
+    func readsFloat() {
         var four = EBMLReader(Data([0x40, 0x49, 0x0F, 0xDB]))
         #expect(abs((four.readFloat(length: 4) ?? 0) - 3.14159) < 0.0001)
 
@@ -57,7 +60,7 @@ struct EBMLTests {
     }
 
     @Test("reads UTF-8 strings and drops the null padding Matroska allows")
-    func readsString() throws {
+    func readsString() {
         var reader = EBMLReader(Data(Array("Twin Peaks".utf8) + [0x00, 0x00]))
         #expect(reader.readString(length: 12) == "Twin Peaks")
     }

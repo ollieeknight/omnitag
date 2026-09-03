@@ -1,8 +1,8 @@
 import Foundation
 import MediaCore
 import PDFKit
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("PDF")
 struct PDFTests {
@@ -15,12 +15,13 @@ struct PDFTests {
     /// A PDF carrying the things a metadata-only edit must not destroy.
     private func book(in directory: URL, annotated: Bool = true) throws -> URL {
         let document = PDFDocument()
-        for index in 0..<3 {
+        for index in 0 ..< 3 {
             let page = PDFPage()
             if annotated, index == 0 {
                 let note = PDFAnnotation(
                     bounds: CGRect(x: 10, y: 10, width: 80, height: 30),
-                    forType: .text, withProperties: nil)
+                    forType: .text, withProperties: nil
+                )
                 note.contents = "a reader's note"
                 page.addAnnotation(note)
             }
@@ -36,7 +37,7 @@ struct PDFTests {
             PDFDocumentAttribute.titleAttribute: "The Secret Diary of Laura Palmer",
             PDFDocumentAttribute.authorAttribute: "Jennifer Lynch",
             PDFDocumentAttribute.creatorAttribute: "Gallery Books",
-            PDFDocumentAttribute.keywordsAttribute: ["Mystery", "Horror"],
+            PDFDocumentAttribute.keywordsAttribute: ["Mystery", "Horror"]
         ]
         let url = directory.appending(path: "diary.pdf")
         #expect(document.write(to: url))
@@ -47,7 +48,7 @@ struct PDFTests {
     func readsAttributes() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let item = try PDFReader().read(try book(in: directory))
+        let item = try PDFReader().read(book(in: directory))
 
         #expect(item.kind == .book)
         #expect(item.container == .pdf)
@@ -61,7 +62,7 @@ struct PDFTests {
     func readsOutline() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let item = try PDFReader().read(try book(in: directory))
+        let item = try PDFReader().read(book(in: directory))
         #expect(item.chapters.map(\.title) == ["July 22, 1984"])
     }
 
@@ -69,7 +70,7 @@ struct PDFTests {
     func rendersPreview() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let item = try PDFReader().read(try book(in: directory))
+        let item = try PDFReader().read(book(in: directory))
         #expect(item.artwork.first?.mimeType == "image/png")
         #expect(item.artwork.first.map { !$0.data.isEmpty } == true)
     }
@@ -131,7 +132,8 @@ struct PDFTests {
 
         #expect(throws: (any Error).self) { try PDFReader().read(url) }
         #expect(throws: (any Error).self) {
-            var tags = TagSet(); tags.title = "Nope"
+            var tags = TagSet()
+            tags.title = "Nope"
             try PDFTagWriter().write(tags, to: url)
         }
         #expect(try Data(contentsOf: url) == junk)
@@ -146,11 +148,12 @@ struct PDFTests {
         let locked = directory.appending(path: "locked.pdf")
         let document = try #require(PDFDocument(url: source))
         #expect(document.write(to: locked, withOptions: [
-            .ownerPasswordOption: "owner", .userPasswordOption: "reader",
+            .ownerPasswordOption: "owner", .userPasswordOption: "reader"
         ]))
 
         #expect(throws: (any Error).self) {
-            var tags = TagSet(); tags.title = "Nope"
+            var tags = TagSet()
+            tags.title = "Nope"
             try PDFTagWriter().write(tags, to: locked)
         }
     }

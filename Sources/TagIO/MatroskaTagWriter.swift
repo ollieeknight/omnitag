@@ -20,10 +20,10 @@ import MediaCore
 /// Clusters are never read, never moved, never touched.
 public struct MatroskaTagWriter: Sendable {
     private enum ID {
-        static let segment: UInt64 = 0x18538067
-        static let tags: UInt64 = 0x1254C367
+        static let segment: UInt64 = 0x1853_8067
+        static let tags: UInt64 = 0x1254_C367
         static let void: UInt64 = 0xEC
-        static let seekHead: UInt64 = 0x114D9B74
+        static let seekHead: UInt64 = 0x114D_9B74
         static let seek: UInt64 = 0x4DBB
         static let seekID: UInt64 = 0x53AB
         static let seekPosition: UInt64 = 0x53AC
@@ -47,7 +47,7 @@ public struct MatroskaTagWriter: Sendable {
         let layout = try Self.layout(of: data, url: url)
 
         if let backups {
-            try backups.record(try MatroskaReader().read(url).tags, for: url)
+            try backups.record(MatroskaReader().read(url).tags, for: url)
         }
 
         let element = EBMLWriter.element(ID.tags, Self.serialiseTags(tags))
@@ -78,7 +78,8 @@ public struct MatroskaTagWriter: Sendable {
             }
             plan.patches.append(Patch(
                 offset: layout.segmentSizeOffset,
-                bytes: EBMLWriter.size(newSize, width: layout.segmentSizeWidth)))
+                bytes: EBMLWriter.size(newSize, width: layout.segmentSizeWidth)
+            ))
         }
 
         try Self.apply(plan, to: url)
@@ -120,12 +121,16 @@ public struct MatroskaTagWriter: Sendable {
             let position = UInt64(plan.fileLength - layout.segmentBodyStart)
             var bytes: [UInt8] = []
             var remaining = position
-            repeat { bytes.insert(UInt8(remaining & 0xFF), at: 0); remaining >>= 8 } while remaining > 0
+            repeat {
+                bytes.insert(UInt8(remaining & 0xFF), at: 0)
+                remaining >>= 8
+            } while remaining > 0
 
             if bytes.count <= field.bodyLength {
                 plan.patches.append(Patch(
                     offset: field.offset + field.headerLength,
-                    bytes: [UInt8](repeating: 0, count: field.bodyLength - bytes.count) + bytes))
+                    bytes: [UInt8](repeating: 0, count: field.bodyLength - bytes.count) + bytes
+                ))
             } else if let blank = EBMLWriter.void(totalLength: field.totalLength) {
                 plan.patches.append(Patch(offset: field.offset, bytes: blank))
             }
@@ -166,10 +171,12 @@ public struct MatroskaTagWriter: Sendable {
     // MARK: layout
 
     struct Element {
-        var offset: Int       // start of the element id
+        var offset: Int // start of the element id
         var headerLength: Int // id + size VINT
         var bodyLength: Int
-        var totalLength: Int { headerLength + bodyLength }
+        var totalLength: Int {
+            headerLength + bodyLength
+        }
     }
 
     struct Layout {
@@ -179,14 +186,14 @@ public struct MatroskaTagWriter: Sendable {
         var segmentSizeIsKnown: Bool
         var tags: Element?
         var voidAfterTags: Int
-        var seekPositionField: Element?  // the SeekPosition payload that points at Tags
+        var seekPositionField: Element? // the SeekPosition payload that points at Tags
     }
 
     /// One pass over the top-level elements. Cluster bodies are skipped by size,
     /// so this costs a few reads regardless of file size.
     static func layout(of data: Data, url: URL) throws -> Layout {
         var reader = EBMLReader(data)
-        guard let header = try? reader.readElementID(), header == 0x1A45DFA3,
+        guard let header = try? reader.readElementID(), header == 0x1A45_DFA3,
               let headerSize = try? reader.readSize()
         else { throw TagIOError.unreadable(url, "not a Matroska file") }
         reader.skip(Int(headerSize))
@@ -206,7 +213,8 @@ public struct MatroskaTagWriter: Sendable {
             segmentSizeOffset: sizeOffset,
             segmentSizeWidth: reader.offset - sizeOffset,
             segmentSizeIsKnown: segmentSize != nil,
-            tags: nil, voidAfterTags: 0, seekPositionField: nil)
+            tags: nil, voidAfterTags: 0, seekPositionField: nil
+        )
 
         let end = segmentSize.map { layout.segmentBodyStart + Int($0) } ?? data.count
         var previousWasTags = false
@@ -218,7 +226,8 @@ public struct MatroskaTagWriter: Sendable {
             else { break }
             let element = Element(
                 offset: start, headerLength: reader.offset - start,
-                bodyLength: Int(size))
+                bodyLength: Int(size)
+            )
             let bodyEnd = min(data.count, reader.offset + element.bodyLength)
 
             switch elementID {
@@ -244,7 +253,9 @@ public struct MatroskaTagWriter: Sendable {
         while reader.offset < end {
             guard let id = try? reader.readElementID(), let size = try? reader.readSize() else { return nil }
             let entryEnd = min(end, reader.offset + Int(size))
-            guard id == ID.seek else { reader.seek(to: entryEnd); continue }
+            guard id == ID.seek else { reader.seek(to: entryEnd)
+                continue
+            }
 
             var isTags = false
             var position: Element?
@@ -255,15 +266,20 @@ public struct MatroskaTagWriter: Sendable {
                 else { break }
                 let length = Int(fieldSize)
                 let field = Element(
-                    offset: fieldStart, headerLength: reader.offset - fieldStart, bodyLength: length)
+                    offset: fieldStart, headerLength: reader.offset - fieldStart, bodyLength: length
+                )
                 if fieldID == ID.seekID, let bytes = reader.readData(length: length) {
                     isTags = [UInt8](bytes) == EBMLWriter.id(ID.tags)
                 } else {
-                    if fieldID == ID.seekPosition { position = field }
+                    if fieldID == ID.seekPosition {
+                        position = field
+                    }
                     reader.skip(length)
                 }
             }
-            if isTags, let position { return position }
+            if isTags, let position {
+                return position
+            }
             reader.seek(to: entryEnd)
         }
         return nil
@@ -277,10 +293,9 @@ public struct MatroskaTagWriter: Sendable {
         gap == 0 ? [] : EBMLWriter.void(totalLength: gap)
     }
 
-
-    /// Rewrites the Segment's declared size in place. The width of the VINT
-    /// cannot change — everything after it would shift — but Matroska writers
-    /// use 8-byte sizes precisely so this is always possible.
+    // Rewrites the Segment's declared size in place. The width of the VINT
+    // cannot change — everything after it would shift — but Matroska writers
+    // use 8-byte sizes precisely so this is always possible.
 
     // MARK: serialising
 
@@ -299,9 +314,9 @@ public struct MatroskaTagWriter: Sendable {
             let targets = EBMLWriter.element(0x63C0, EBMLWriter.uint(0x68CA, UInt64(level)))
             let simpleTags = pairs.sorted { $0.0 < $1.0 }.flatMap { name, text in
                 EBMLWriter.element(0x67C8,
-                    EBMLWriter.string(0x45A3, name)
-                    + EBMLWriter.string(0x4487, text)
-                    + EBMLWriter.string(0x447A, "und"))  // TagLanguage: required by the spec
+                                   EBMLWriter.string(0x45A3, name)
+                                       + EBMLWriter.string(0x4487, text)
+                                       + EBMLWriter.string(0x447A, "und")) // TagLanguage: required by the spec
             }
             payload += EBMLWriter.element(0x7373, targets + simpleTags)
         }
@@ -310,7 +325,7 @@ public struct MatroskaTagWriter: Sendable {
 
     // MARK: committing
 
-    /// Same discipline as every other writer: stage, verify, swap. The staged
-    /// copy costs a full file write, which for gigabytes is the price of never
-    /// leaving a half-written film behind.
+    // Same discipline as every other writer: stage, verify, swap. The staged
+    // copy costs a full file write, which for gigabytes is the price of never
+    // leaving a half-written film behind.
 }

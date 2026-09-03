@@ -54,42 +54,65 @@ The wizard, per the specified design:
    A pasted ASIN or Audible URL is accepted here too.
 3. Results list — title, author, narrator, year, runtime, cover thumbnail.
 4. Tag diff: current value beside proposed value, per field, with the new
-   artwork shown. Three actions: **Merge** (fill only what is empty),
-   **Overwrite selected** (the ticked rows), **Overwrite all** (replace the tag
-   set entirely, dropping anything the provider does not supply).
-5. Chapter diff, if the provider returned chapters: same side-by-side, with
-   per-chapter titles editable in place before committing.
+   artwork shown. Three tick-presets — **Fill empty**, **Take all**, **None** —
+   and a **Clean overwrite** switch that also removes the tags the provider does
+   not supply. The ticked rows are what gets written.
+5. Chapter diff, if the provider returned chapters and one file is selected:
+   the same side by side, with every title editable before committing.
 6. Write, through the existing `EditEngine` so the whole thing is one undoable
    batch.
 
 ## Chapter editing
 
-Reading chapters is done (m4b via chapter groups, mkv via `ChapterAtom`).
-Editing them is the open design question; the plan:
+Chapters are `[Chapter]` on `MediaItem`, and there are two places to change them.
 
-- **Model**: chapters are already `[Chapter]` on `MediaItem`. The diff pairs
-  provider chapters with existing ones by index, and each row can take either
-  side or a hand-typed title. Times come from the provider or stay as they are —
-  retiming audio is not something a tagger should guess at.
-- **Bulk tools** worth having, because 85-chapter audiobooks are normal:
-  a rename pattern (`Chapter %n%`, `%title%`), and a "keep my titles, take their
-  times" toggle.
-- **Writing m4b chapters** is the hard part. AVFoundation cannot patch a chapter
-  track in place; it writes chapters by building a new text track, which means
-  `AVAssetWriter` and a full remux of a several-hundred-megabyte file. Options:
-  1. Remux via `AVAssetWriter`, showing progress. Correct, slow, safe.
-  2. Patch the `moov/udta/chpl` (Nero) atom in place, like the mkv writer does.
-     Fast, but only some players read `chpl`, and the QuickTime chapter track
-     would still disagree with it.
-  3. Do both: patch `chpl` and rewrite the text track's sample data in place
-     when the new titles fit the existing sample sizes.
-  **Decision**: (1) is now implemented via `MPEG4ChapterWriter`, because correctness beats speed for a feature
-  that runs once per book. (2) may be added later as a fast path when only titles
-  changed and the file already has a `chpl` atom.
+**In the inspector**, for a single audio selection: the chapter list shows every
+mark, its start time is a link that plays from there, the title is editable in
+place, and `-` removes one. The transport bar's **Add Marker** drops a new
+chapter at the playhead.
 
-Whatever is chosen, the write goes through the same staged-and-verified
-discipline as every other writer, and the previous chapters are archived
-alongside the previous tags.
+**In the wizard**, against a provider: the chapters step pairs the file's
+chapters with the provider's and shows what will be written.
+
+### How the two lists are reconciled
+
+One rule, not a menu of them: **the file's timings win, the provider's titles
+are borrowed**. The timings came from the audio; Audible's are a different
+master and drift from the file's by a minute or more over a twelve-hour book.
+A file with no chapters at all is the exception — there, the provider's
+chapters are imported outright, times and all.
+
+Matching titles onto times is nearest-wins with two guards, both learned from
+real books:
+
+- The provider list carries seconds-long "Part Two" markers that sit on top of a
+  real chapter. Taking one shifts every later title by one, so a candidate whose
+  length is nothing like the file chapter's is refused.
+- A match more than two minutes out is not a match, and the file's own title stays.
+
+The step starts with **Update chapters** on. It starts off in one case: the file
+already has written-out titles ("Blood from misunderstanding") and the provider
+only has numbered ones. Losing those to "Chapter 7" is the one outcome worth
+defaulting against; a differing chapter count is not, because the timings are
+kept either way.
+
+Beyond that the table is the truth: any title can be typed over, **Bulk Tools**
+retitles every row from a pattern (`Chapter %n%`, `%n%. %title%`), the up/down
+arrows slide the titles a row when a list comes back one out, and **Reset** goes
+back to the provider's answer.
+
+### Writing them
+
+`MPEG4ChapterWriter` rebuilds the file with an `AVAssetWriter`: the audio is
+copied through un-decoded, a QuickTime text track is generated beside it, and the
+two are associated. `AVAssetExportSession` cannot do this — and, verified against
+a real m4b, a passthrough export *drops* the chapter track a file arrived with.
+So every MPEG-4 file that has chapters is written this way, whether or not the
+chapters were what changed. It is not the slow path it sounds like: a 234 MB,
+10.7-hour audiobook is rewritten in about 1.2 seconds.
+
+The write is staged, verified — playable, right duration, right chapter count —
+and swapped atomically, like every other writer here.
 
 ## The library around it
 
@@ -109,15 +132,6 @@ A docked mini-transport bar appears whenever an audio file is selected. Built on
 - 15-second jump backward (`⌘←`) and forward (`⌘→`).
 - "Add Marker" / "Add at Playhead" button to insert a chapter mark at the current
   audio timestamp.
-
-### Chapter editing in the main UI
-
-In addition to the Metadata Wizard's side-by-side reconciliation, the Inspector
-contains a live Chapter Studio for single audio selections:
-- Editable title text fields.
-- Clickable timecodes that seek the player directly to chapter boundaries.
-- Individual chapter deletion (`-`).
-- "Add at Playhead" (`+`) button.
 
 ### Artwork handling
 
@@ -147,12 +161,13 @@ Four steps, and the chapters one disappears when there is nothing to reconcile
 - **The three spec'd actions are tick-presets**, not separate commit paths:
   *Fill empty* ticks only the fields the file lacks, *Take all* ticks everything
   Audible answered, *None* clears the ticks. The row is always the truth.
-- **The chapter strategy rewrites the rows**, so the table previews exactly what
-  will be written.
+- **The alignment rewrites the rows**, so the table previews exactly what will
+  be written.
 - **A pasted ASIN or Audible link is a lookup, not a search.** The field detects
   a `B…` identifier in whatever is pasted, shows an ASIN badge, and queries the
   product endpoint directly.
-- **Bulk chapter tools.** Retitle all with `Chapter %n%` / `%n%. %title%`.
+- **Bulk chapter tools.** Retitle all with `Chapter %n%` / `%n%. %title%`, or
+  slide the titles a row when the provider's list is offset from the file's.
 - **Artwork failure is not tag failure.** A cover that will not download is
   reported in the bar; the tags the user just reviewed are still applied.
 

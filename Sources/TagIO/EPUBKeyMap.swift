@@ -11,7 +11,7 @@ public enum EPUBKeyMap {
         ("publisher", .publisher),
         ("description", .synopsis),
         ("language", .language),
-        ("subject", .genre),
+        ("subject", .genre)
     ]
 
     static func key(forElement name: String) -> TagKey? {
@@ -53,7 +53,7 @@ public enum EPUBKeyMap {
         }
         if let index = package.meta(property: "group-position")
             ?? package.legacyMeta(name: "calibre:series_index"),
-           let number = Int(index.split(separator: ".").first.map(String.init) ?? index) {
+            let number = Int(index.split(separator: ".").first.map(String.init) ?? index) {
             tags[.seriesIndex] = .number(number)
         }
         if let subtitle = package.metadata.first(where: {
@@ -80,7 +80,9 @@ public enum EPUBKeyMap {
             if scheme == "isbn" || text.lowercased().hasPrefix("urn:isbn:") {
                 return digits.isEmpty ? text : digits
             }
-            if digits.count == 13 || digits.count == 10 { return digits }
+            if digits.count == 13 || digits.count == 10 {
+                return digits
+            }
         }
         return nil
     }
@@ -98,7 +100,7 @@ public enum EPUBKeyMap {
         for element in package.metadata {
             let isDublinCore = element.namespace == OPFDocument.dublinCore
             if isDublinCore, let key = key(forElement: element.name), managedKeys.contains(key) {
-                continue  // rewritten below
+                continue // rewritten below
             }
             if isDublinCore, element.name == "date" || element.name == "identifier" {
                 continue
@@ -138,7 +140,9 @@ public enum EPUBKeyMap {
             let idAttribute = identifierID.map { " id=\"\(OPFDocument.escape($0))\"" } ?? ""
             lines.append("<dc:identifier\(idAttribute) opf:scheme=\"ISBN\">\(OPFDocument.escape(isbn))</dc:identifier>")
         } else {
-            for identifier in package.allDC("identifier") { lines.append(serialise(identifier)) }
+            for identifier in package.allDC("identifier") {
+                lines.append(serialise(identifier))
+            }
         }
 
         if let series = tags[.series]?.stringValue, !series.isEmpty {

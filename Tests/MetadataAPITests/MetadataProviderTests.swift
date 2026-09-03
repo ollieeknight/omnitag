@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import MetadataAPI
+import Testing
 
 @Suite("MetadataProvider")
 struct MetadataProviderTests {
@@ -33,13 +33,15 @@ struct MetadataProviderTests {
     func providersDeclareKinds() {
         #expect(AudibleMetadataProvider().kinds == [.audiobook])
         #expect(OpenLibraryProvider().kinds == [.book])
+        #expect(TMDBProvider(keyStore: TMDBKeyStore(service: "omnitag.tmdb.test.kinds")).kinds == [.movie, .tvEpisode])
     }
 
     @Test("the registry hands the wizard only providers for the current tab")
     func registryFiltersByKind() {
         #expect(MetadataProviders.serving(.book).map(\.id) == ["openlibrary"])
         #expect(MetadataProviders.serving(.audiobook).map(\.id) == ["audible.uk"])
-        #expect(MetadataProviders.serving(.movie).isEmpty, "TMDB is not built yet")
+        #expect(MetadataProviders.serving(.movie).map(\.id) == ["tmdb"])
+        #expect(MetadataProviders.serving(.tvEpisode).map(\.id) == ["tmdb"])
     }
 
     @Test("the Audible provider's name and id follow its region")
@@ -67,7 +69,8 @@ struct MetadataProviderTests {
     @Test("an OpenLibrary works key is not shown as if it were an ASIN")
     func worksKeysAreHiddenFromTheRow() async throws {
         let (provider, _) = openLibrary()
-        var query = MetadataQuery(); query.searchText = "laura palmer"
+        var query = MetadataQuery()
+        query.searchText = "laura palmer"
         let first = try #require(try await provider.search(query, limit: 1).first)
 
         #expect(first.id == "/works/OL12345W")
@@ -77,7 +80,8 @@ struct MetadataProviderTests {
     @Test("OpenLibrary details write an ISBN, never an ASIN")
     func openLibraryWritesISBNNotASIN() async throws {
         let (provider, _) = openLibrary()
-        var query = MetadataQuery(); query.searchText = "laura palmer"
+        var query = MetadataQuery()
+        query.searchText = "laura palmer"
         let candidate = try #require(try await provider.search(query, limit: 1).first)
 
         let details = try await provider.details(for: candidate)
@@ -100,7 +104,8 @@ struct MetadataProviderTests {
           "isbn":["9780140170870","9781451664782","9780671735906","9781849838627"]}]}
         """.utf8)
         let provider = OpenLibraryProvider(transport: transport)
-        var query = MetadataQuery(); query.searchText = "laura palmer"
+        var query = MetadataQuery()
+        query.searchText = "laura palmer"
         let candidate = try #require(try await provider.search(query, limit: 1).first)
 
         let tags = try await provider.details(for: candidate).book.tagSet
@@ -112,7 +117,8 @@ struct MetadataProviderTests {
     func emptyResultsAreNotErrors() async throws {
         let transport = StubTransport()
         transport.responses["openlibrary.org/search.json"] = Data(#"{"docs":[]}"#.utf8)
-        var query = MetadataQuery(); query.searchText = "nothing at all"
+        var query = MetadataQuery()
+        query.searchText = "nothing at all"
 
         #expect(try await OpenLibraryProvider(transport: transport).search(query, limit: 20).isEmpty)
     }

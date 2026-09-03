@@ -56,8 +56,13 @@ enum ID3v2 {
         /// Header + body, i.e. the offset at which the audio starts.
         var totalSize: Int
 
-        var isUnsynchronised: Bool { flags & 0x80 != 0 }
-        var hasExtendedHeader: Bool { flags & 0x40 != 0 }
+        var isUnsynchronised: Bool {
+            flags & 0x80 != 0
+        }
+
+        var hasExtendedHeader: Bool {
+            flags & 0x40 != 0
+        }
     }
 
     // MARK: parsing
@@ -68,11 +73,11 @@ enum ID3v2 {
     static func parse(_ data: Data) -> Tag? {
         guard data.count >= headerSize else { return nil }
         let bytes = [UInt8](data.prefix(headerSize))
-        guard bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 else { return nil }  // "ID3"
+        guard bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 else { return nil } // "ID3"
 
         let version = bytes[3]
         let flags = bytes[5]
-        let bodySize = desynchsafe(Array(bytes[6..<10]))
+        let bodySize = desynchsafe(Array(bytes[6 ..< 10]))
         let totalSize = headerSize + bodySize
         guard data.count >= totalSize else { return nil }
 
@@ -84,26 +89,26 @@ enum ID3v2 {
 
         var cursor = headerSize
         if tag.hasExtendedHeader, data.count >= cursor + 4 {
-            let size = Array(data[(data.startIndex + cursor)..<(data.startIndex + cursor + 4)])
+            let size = Array(data[(data.startIndex + cursor) ..< (data.startIndex + cursor + 4)])
             cursor += version >= 4 ? desynchsafe(size) : bigEndian(size) + 4
         }
 
         while cursor + 10 <= totalSize {
             let start = data.startIndex + cursor
-            let idBytes = Array(data[start..<(start + 4)])
+            let idBytes = Array(data[start ..< (start + 4)])
             // Padding: the rest of the body is zeroes, and frames are finished.
             guard idBytes[0] != 0 else { break }
             guard let id = String(bytes: idBytes, encoding: .isoLatin1) else { break }
 
-            let sizeBytes = Array(data[(start + 4)..<(start + 8)])
+            let sizeBytes = Array(data[(start + 4) ..< (start + 8)])
             // v2.4 sizes are synchsafe, v2.3 sizes are plain. Reading one as the
             // other silently truncates every frame past the first large one.
             let size = version >= 4 ? desynchsafe(sizeBytes) : bigEndian(sizeBytes)
-            let frameFlags = Array(data[(start + 8)..<(start + 10)])
+            let frameFlags = Array(data[(start + 8) ..< (start + 10)])
             let payloadStart = cursor + 10
             guard size >= 0, payloadStart + size <= totalSize else { break }
 
-            let payload = data[(data.startIndex + payloadStart)..<(data.startIndex + payloadStart + size)]
+            let payload = data[(data.startIndex + payloadStart) ..< (data.startIndex + payloadStart + size)]
             tag.frames.append(Frame(id: id, flags: frameFlags, payload: Data(payload)))
             cursor = payloadStart + size
         }
@@ -138,8 +143,12 @@ enum ID3v2 {
             guard let value = frame.textValue, !value.isEmpty else { continue }
             if let pair = ID3KeyMap.pairedFrames[frame.id] {
                 let (index, total) = ID3KeyMap.split(value)
-                if let index { tags[pair.index] = .number(index) }
-                if let total { tags[pair.total] = .number(total) }
+                if let index {
+                    tags[pair.index] = .number(index)
+                }
+                if let total {
+                    tags[pair.total] = .number(total)
+                }
                 continue
             }
             let key = ID3KeyMap.key(forIdentifier: "id3/\(frame.id)")
@@ -168,12 +177,13 @@ enum ID3v2 {
         // Anything the domain model does not name, written as a user-defined
         // TXXX frame so a round-trip through OmniTag stays lossless.
         for (key, value) in tags.values {
-            guard case .custom(let name) = key, !name.hasPrefix("id3/"),
+            guard case let .custom(name) = key, !name.hasPrefix("id3/"),
                   let text = value.stringValue
             else { continue }
             frames.append(Frame(
                 id: "TXXX", flags: [0, 0],
-                payload: Data([0x03] + Array(name.utf8) + [0x00] + Array(text.utf8))))
+                payload: Data([0x03] + Array(name.utf8) + [0x00] + Array(text.utf8))
+            ))
         }
 
         return frames.sorted { $0.id < $1.id }

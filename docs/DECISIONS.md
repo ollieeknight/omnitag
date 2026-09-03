@@ -73,5 +73,5 @@ bugs the synthetic fixtures could not.
 
 ## Out of scope, permanently
 
-Cloud sync, streaming, playback, library server, "where to watch" data
+Cloud sync, streaming, library server, "where to watch" data
 (Watchmode). OmniTag edits tags on local files.

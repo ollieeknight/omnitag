@@ -29,12 +29,13 @@ public struct RenamePlan: Sendable {
         case collision
         /// A file of that name is already on disk, outside the selection.
         case exists
-
-        public var isActionable: Bool { self == .ready }
     }
 
     public struct Row: Sendable, Identifiable {
-        public var id: URL { url }
+        public var id: URL {
+            url
+        }
+
         public let url: URL
         public let currentName: String
         /// The name this file would take, extension included. Empty when the
@@ -58,15 +59,14 @@ public struct RenamePlan: Sendable {
             let result = pattern.render(item.tags)
             let ext = item.url.pathExtension
             let name = result.name.isEmpty ? "" : (ext.isEmpty ? result.name : "\(result.name).\(ext)")
-            let status: Status
-            if result.name.isEmpty {
-                status = result.missing.isEmpty ? .empty : .missing(result.missing)
+            let status: Status = if result.name.isEmpty {
+                result.missing.isEmpty ? .empty : .missing(result.missing)
             } else if !result.missing.isEmpty {
-                status = .missing(result.missing)
+                .missing(result.missing)
             } else if name == item.url.lastPathComponent {
-                status = .unchanged
+                .unchanged
             } else {
-                status = .ready
+                .ready
             }
             if status == .ready {
                 wanted[name.lowercased(), default: 0] += 1
@@ -90,7 +90,8 @@ public struct RenamePlan: Sendable {
                 url: entry.item.url,
                 currentName: entry.item.url.lastPathComponent,
                 newName: entry.name,
-                status: status))
+                status: status
+            ))
         }
 
         self.rows = rows
@@ -101,4 +102,7 @@ public struct RenamePlan: Sendable {
 public struct RenameOutcome: Sendable {
     public let renamed: Int
     public let failures: [SaveFailure]
+    /// The moves that actually happened on disk — a caller remapping its own
+    /// state (selection, open player) must follow these, not every move asked for.
+    public let done: [RenameMove]
 }

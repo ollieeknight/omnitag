@@ -7,7 +7,10 @@ enum EBMLWriter {
     static func id(_ value: UInt64) -> [UInt8] {
         var bytes: [UInt8] = []
         var remaining = value
-        while remaining > 0 { bytes.insert(UInt8(remaining & 0xFF), at: 0); remaining >>= 8 }
+        while remaining > 0 {
+            bytes.insert(UInt8(remaining & 0xFF), at: 0)
+            remaining >>= 8
+        }
         return bytes.isEmpty ? [0] : bytes
     }
 
@@ -15,8 +18,8 @@ enum EBMLWriter {
     /// allows and which is how an element is grown by a byte or two to make a
     /// leftover gap paddable.
     static func size(_ value: Int, width forced: Int? = nil) -> [UInt8] {
-        let width = forced ?? (1...8).first { value < (1 << (7 * $0)) - 1 } ?? 8
-        var bytes = (0..<width).reversed().map { UInt8((value >> (8 * $0)) & 0xFF) }
+        let width = forced ?? (1 ... 8).first { value < (1 << (7 * $0)) - 1 } ?? 8
+        var bytes = (0 ..< width).reversed().map { UInt8((value >> (8 * $0)) & 0xFF) }
         bytes[0] |= UInt8(0x80 >> (width - 1))
         return bytes
     }
@@ -32,7 +35,10 @@ enum EBMLWriter {
     static func uint(_ elementID: UInt64, _ value: UInt64) -> [UInt8] {
         var bytes: [UInt8] = []
         var remaining = value
-        repeat { bytes.insert(UInt8(remaining & 0xFF), at: 0); remaining >>= 8 } while remaining > 0
+        repeat {
+            bytes.insert(UInt8(remaining & 0xFF), at: 0)
+            remaining >>= 8
+        } while remaining > 0
         return element(elementID, bytes)
     }
 
@@ -44,7 +50,7 @@ enum EBMLWriter {
         // Try each size-VINT width until id + size + payload lands exactly.
         // An all-ones size means "unknown length" in EBML, so a payload of
         // exactly 2^(7w)-1 is unusable at that width.
-        for width in 1...8 {
+        for width in 1 ... 8 {
             let payload = totalLength - 1 - width
             guard payload >= 0 else { break }
             guard payload < (1 << (7 * width)) - 1 else { continue }

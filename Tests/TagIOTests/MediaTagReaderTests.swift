@@ -1,7 +1,7 @@
 import Foundation
 import MediaCore
-import Testing
 @testable import TagIO
+import Testing
 
 @Suite("MediaTagReader")
 struct MediaTagReaderTests {
@@ -40,14 +40,15 @@ struct MediaTagWriterTests {
     func routes() async throws {
         let library = try FixtureLibrary()
         let m4a = try library.makeUntagged(TwinPeaks.theme)
-        var tags = TagSet(); tags.title = "Twin Peaks Theme"
+        var tags = TagSet()
+        tags.title = "Twin Peaks Theme"
         try await MediaTagWriter().write(tags, to: m4a)
         #expect(try await MediaTagReader().read(m4a).tags.title == "Twin Peaks Theme")
 
         let mp3 = ID3Builder.mp3(tag: ID3Builder.tag(frames: []))
         defer { try? FileManager.default.removeItem(at: mp3) }
         try await MediaTagWriter().write(tags, to: mp3)
-        let written = try #require(ID3v2.parse(try Data(contentsOf: mp3)))
+        let written = try #require(try ID3v2.parse(Data(contentsOf: mp3)))
         #expect(written.frames.first { $0.id == "TIT2" }?.textValue == "Twin Peaks Theme")
     }
 

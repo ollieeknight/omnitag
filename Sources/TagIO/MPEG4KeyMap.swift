@@ -28,13 +28,13 @@ enum MPEG4KeyMap {
         .showName: "tvsh",
         .seasonNumber: "tvsn",
         .episodeNumber: "tves",
-        .episodeTitle: "tven",
+        .episodeTitle: "tven"
     ]
 
     /// Keys stored in one packed `index/total` atom rather than two text atoms.
     static let pairAtoms: [(atom: String, index: TagKey, total: TagKey)] = [
         ("trkn", .trackNumber, .trackTotal),
-        ("disk", .discNumber, .discTotal),
+        ("disk", .discNumber, .discTotal)
     ]
 
     /// No standard atom exists, so these go in freeform `----` atoms under the
@@ -49,13 +49,16 @@ enum MPEG4KeyMap {
         .studio: "STUDIO",
         // Real freeform atom name Apple itself uses for the rating string.
         .contentRating: "iTunEXTC",
+        // No standard atom for a provider id; Plex/Jellyfin-style tools already
+        // look for "tmdb" under com.apple.iTunes in freeform atoms.
+        .tmdbID: "tmdb"
     ]
 
     /// Values that must come back as `.number`, not `.string`, after a
     /// round-trip through a text atom.
     static let numericKeys: Set<TagKey> = [
         .year, .trackNumber, .trackTotal, .discNumber, .discTotal,
-        .seriesIndex, .seasonNumber, .episodeNumber,
+        .seriesIndex, .seasonNumber, .episodeNumber
     ]
 
     private static let freeformPrefix = "itlk/com.apple.iTunes."
@@ -70,17 +73,32 @@ enum MPEG4KeyMap {
             table[atom] = key
             table[atom.replacingOccurrences(of: "©", with: "%A9")] = key
         }
+        table["asin"] = .asin
         return table
     }()
-    private static let keysByFreeform =
-        Dictionary(uniqueKeysWithValues: freeformNames.map { ($0.value, $0.key) })
+
+    private static let keysByFreeformUpper: [String: TagKey] = {
+        var table: [String: TagKey] = [:]
+        for (key, name) in freeformNames {
+            table[name.uppercased()] = key
+        }
+        table["GENRE"] = .genre
+        return table
+    }()
+
     private static let pairKeysByAtom =
         Dictionary(uniqueKeysWithValues: pairAtoms.map { ($0.atom, ($0.index, $0.total)) })
 
     static func identifier(for key: TagKey) -> AVMetadataIdentifier? {
-        if let atom = atoms[key] { return AVMetadataIdentifier(atomPrefix + atom) }
-        if let name = freeformNames[key] { return AVMetadataIdentifier(freeformPrefix + name) }
-        if case .custom(let name) = key { return AVMetadataIdentifier(freeformPrefix + name) }
+        if let atom = atoms[key] {
+            return AVMetadataIdentifier(atomPrefix + atom)
+        }
+        if let name = freeformNames[key] {
+            return AVMetadataIdentifier(freeformPrefix + name)
+        }
+        if case let .custom(name) = key {
+            return AVMetadataIdentifier(freeformPrefix + name)
+        }
         return nil
     }
 
@@ -94,11 +112,15 @@ enum MPEG4KeyMap {
     /// `.custom` so a round-trip never silently drops them.
     static func key(for item: AVMetadataItem) -> TagKey? {
         guard let raw = item.identifier?.rawValue else { return nil }
-        if raw.hasPrefix(freeformPrefix) {
-            let name = String(raw.dropFirst(freeformPrefix.count))
+        if raw.hasPrefix("itlk/") {
+            let name = if let dotIndex = raw.lastIndex(of: ".") {
+                String(raw[raw.index(after: dotIndex)...])
+            } else {
+                String(raw.dropFirst("itlk/".count))
+            }
             // Apple's own gapless-playback atom is machine state, not a user tag.
             guard name != "iTunSMPB" else { return nil }
-            return keysByFreeform[name] ?? .custom(name)
+            return keysByFreeformUpper[name.uppercased()] ?? .custom(name)
         }
         if raw.hasPrefix(atomPrefix) {
             let code = String(raw.dropFirst(atomPrefix.count))
@@ -108,15 +130,19 @@ enum MPEG4KeyMap {
     }
 
     static func value(_ string: String, for key: TagKey) -> TagValue {
-        if numericKeys.contains(key), let n = Int(string) { return .number(n) }
+        if numericKeys.contains(key), let n = Int(string) {
+            return .number(n)
+        }
         return .string(string)
     }
 
     /// `index`/`total` packed big-endian into the 8-byte `trkn` / 6-byte `disk` payload.
     static func packedPair(index: Int?, total: Int?, byteCount: Int) -> Data {
         var bytes = [UInt8](repeating: 0, count: byteCount)
-        bytes[2] = UInt8((index ?? 0) >> 8 & 0xff); bytes[3] = UInt8((index ?? 0) & 0xff)
-        bytes[4] = UInt8((total ?? 0) >> 8 & 0xff); bytes[5] = UInt8((total ?? 0) & 0xff)
+        bytes[2] = UInt8((index ?? 0) >> 8 & 0xFF)
+        bytes[3] = UInt8((index ?? 0) & 0xFF)
+        bytes[4] = UInt8((total ?? 0) >> 8 & 0xFF)
+        bytes[5] = UInt8((total ?? 0) & 0xFF)
         return Data(bytes)
     }
 

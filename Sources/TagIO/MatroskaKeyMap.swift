@@ -33,10 +33,11 @@ enum MatroskaKeyMap {
         "NARRATOR": .narrator,
         "AUTHOR": .author,
         "TOTAL_PARTS": .trackTotal,
+        "TMDB": .tmdbID
     ]
 
     static let numericKeys: Set<TagKey> = [
-        .year, .trackNumber, .trackTotal, .seasonNumber, .episodeNumber, .seriesIndex,
+        .year, .trackNumber, .trackTotal, .seasonNumber, .episodeNumber, .seriesIndex
     ]
 
     /// The two names that only make sense once you know what they are attached to.
@@ -70,7 +71,7 @@ enum MatroskaKeyMap {
         case .title: ("TITLE", defaultTargetLevel)
         case .episodeNumber: ("PART_NUMBER", defaultTargetLevel)
         case .album: ("ALBUM", seasonLevel)
-        case .custom(let name):
+        case let .custom(name):
             name.hasPrefix("mkv/")
                 ? (String(name.dropFirst(4)), defaultTargetLevel)
                 : (name.uppercased(), defaultTargetLevel)
@@ -82,8 +83,12 @@ enum MatroskaKeyMap {
     /// Matroska dates are ISO-ish (`1990-04-08`); keep the year.
     static func value(_ string: String, for key: TagKey) -> TagValue {
         guard numericKeys.contains(key) else { return .string(string) }
-        if let number = Int(string) { return .number(number) }
-        if key == .year, let year = Int(string.prefix(4)) { return .number(year) }
+        if let number = Int(string) {
+            return .number(number)
+        }
+        if key == .year, let year = Int(string.prefix(4)) {
+            return .number(year)
+        }
         return .string(string)
     }
 }
