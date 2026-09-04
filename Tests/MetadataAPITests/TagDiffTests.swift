@@ -151,11 +151,14 @@ struct TagDiffDeltaTests {
         #expect(delta[.title] == nil)
     }
 
-    @Test("a row edited to blank is included rather than skipped")
-    func blankRowsAreIncluded() {
+    @Test("a row edited to blank is skipped, never written as a tag deletion")
+    func blankRowsAreSkipped() {
+        // `applySnapshot` maps an empty string onto `item.tags[key] = nil`, so
+        // carrying a blank row through the delta deleted the file's existing
+        // tag. Emptying a row means "leave this one alone", per `delta`'s doc.
         let delta = diff().delta(for: [.narrator, .author])
-        #expect(delta[.narrator]?.stringValue == "")
-        #expect(delta.values.count == 2)
+        #expect(delta[.narrator] == nil)
+        #expect(delta.values.count == 1)
     }
 
     @Test("fill-empty ticks only the fields the file lacks")
@@ -295,5 +298,59 @@ struct ChapterBulkToolTests {
             Chapter(index: 3, start: 1800, title: "Meeting the Invisibles - At the foot of a Golden Throne")
         ]
         #expect(ChapterDiff.hasRichTitles(richChapters) == true)
+    }
+}
+
+@Suite("Standard field labels")
+struct StandardFieldLabelTests {
+    @Test("a TV episode's standard fields include the synopsis TMDB returns for it")
+    func tvEpisodeHasSynopsis() {
+        let keys = TagKey.standardFields(for: .tvEpisode).map(\.key)
+        #expect(keys.contains(.synopsis))
+    }
+
+    @Test("every standard field carries a hand-written label, not a derived one")
+    func labelsAreCurated() {
+        // "TMDB ID", not the "Tmdb Id" a camel-case split of the enum case
+        // name produces — the wizard's tag table reads these.
+        let movie = Dictionary(uniqueKeysWithValues: TagKey.standardFields(for: .movie))
+        #expect(movie[.tmdbID] == "TMDB ID")
+        #expect(TagKey.label(for: .tmdbID) == "TMDB ID")
+        #expect(TagKey.label(for: .showName) == "Show")
+    }
+}
+
+@Suite("Tag diff row order")
+struct TagDiffOrderTests {
+    @Test("rows follow the curated field order, not the alphabet")
+    func standardOrderWins() throws {
+        var proposed = TagSet()
+        proposed[.title] = .string("Northwest Passage")
+        proposed[.showName] = .string("Twin Peaks")
+        proposed[.seasonNumber] = .number(1)
+        proposed[.episodeNumber] = .number(1)
+        proposed[.director] = .string("David Lynch")
+
+        let diff = TagDiff(current: TagSet(), proposed: proposed, kind: .tvEpisode)
+        let order = diff.rows.map(\.key)
+
+        // Alphabetically Director would come first and Title nearly last —
+        // which is not how anyone reads an episode.
+        #expect(try #require(order.firstIndex(of: .title)) < order.firstIndex(of: .showName)!)
+        #expect(try #require(order.firstIndex(of: .showName)) < order.firstIndex(of: .seasonNumber)!)
+        #expect(try #require(order.firstIndex(of: .seasonNumber)) < order.firstIndex(of: .episodeNumber)!)
+        #expect(try #require(order.firstIndex(of: .episodeNumber)) < order.firstIndex(of: .director)!)
+    }
+
+    @Test("a field the file has but the kind does not list still appears, after the standard ones")
+    func extrasComeLast() throws {
+        var current = TagSet()
+        current[.custom("MOOD")] = .string("Ominous")
+
+        let diff = TagDiff(current: current, proposed: TagSet(), kind: .movie)
+        let order = diff.rows.map(\.key)
+
+        #expect(order.contains(.custom("MOOD")))
+        #expect(try #require(order.firstIndex(of: .title)) < order.firstIndex(of: .custom("MOOD"))!)
     }
 }
