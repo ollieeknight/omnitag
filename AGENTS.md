@@ -13,14 +13,17 @@ Read these before writing anything. They are short and they are current.
 | `docs/FORMATS.md` | where every tag physically lives, per container |
 | `docs/ARCHITECTURE.md` | module boundaries and stack rationale |
 | `docs/DECISIONS.md` | settled questions — do not re-litigate these |
+| `docs/COMPETITION.md` | what rival tools ship, and the gap ranking the roadmap follows |
 | `docs/DEVELOPMENT.md` | build, test, Xcode, real-media testing |
 | `docs/DISTRIBUTION.md` | Homebrew and signing |
 | `docs/AUDIOBOOKS.md` | the Audible/Audnexus APIs and the metadata wizard |
 | `docs/BOOKS.md` | EPUB and PDF, the zip writer, and the OpenLibrary provider |
 | `docs/MOVIES_TV.md` | TMDB provider, Keychain key storage, TV episode picker |
+| `docs/MUSIC.md` | the iTunes Search provider and the album-safe multi-file guard |
 | `docs/FILENAMES.md` | the `%field%` pattern language, renaming, and parsing names |
+| `docs/UI.md` | the main window: scopes, per-scope columns, chrome, empty states |
 
-"Read the docs and do X" means: those ten, then X. If X is not in the roadmap,
+"Read the docs and do X" means: those thirteen, then X. If X is not in the roadmap,
 say where it fits before starting.
 
 When you finish a piece of work, update `STATUS.md` and tick the roadmap entry
@@ -71,7 +74,8 @@ Sources/TagIO         MediaTagReader / MediaTagWriter (facades), AVTagReader,
 Sources/EditEngine    TagEdit, EditEngine (batch + undo/redo), FileTagWriter,
                       RenamePlan
 Sources/MetadataAPI   MetadataProvider protocol, AudibleClient, AudnexusClient,
-                      AudibleProvider, OpenLibraryProvider
+                      AudibleProvider, OpenLibraryProvider, TMDBClient/Provider,
+                      ITunesClient/Provider
 Sources/LibraryIndex  LibraryScanner
 Sources/OmniTagApp    SwiftUI shell (views live here so Previews work)
 Tests/                Swift Testing
@@ -141,7 +145,7 @@ Process skills first; they set the approach.
 | Writing any code | `superpowers:test-driven-development` or `mattpocock-skills:tdd` |
 | Something broken | `superpowers:systematic-debugging`, `mattpocock-skills:diagnosing-bugs` |
 | Before claiming done | `superpowers:verification-before-completion` |
-| Any Apple/TMDB/Audnexus API question | `find-docs` (`ctx7`). Never answer from memory |
+| Any Apple/TMDB/Audnexus/iTunes API question | `find-docs` (`ctx7`). Never answer from memory |
 | Module or seam design | `mattpocock-skills:codebase-design`, `domain-modeling` |
 | Reviewing a diff | `mattpocock-skills:code-review`, `ponytail-review`, `caveman-review` |
 | Tracking deferred shortcuts | `ponytail-debt` (harvests `ponytail:` comments) |
