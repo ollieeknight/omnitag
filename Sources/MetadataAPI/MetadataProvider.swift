@@ -31,6 +31,11 @@ public protocol MetadataProvider: Sendable {
     /// routing decision is testable against a fake provider, not tied to one
     /// concrete type.
     var hasEpisodePicker: Bool { get }
+
+    /// True when this provider needs an API key and does not have one, so the
+    /// wizard can say so before the user types a query that is certain to
+    /// fail. Only TMDB needs a key; everything else defaults to `false`.
+    var isMissingAPIKey: Bool { get }
 }
 
 public extension MetadataProvider {
@@ -43,6 +48,10 @@ public extension MetadataProvider {
     }
 
     var hasEpisodePicker: Bool {
+        false
+    }
+
+    var isMissingAPIKey: Bool {
         false
     }
 }
@@ -125,7 +134,7 @@ public struct OpenLibraryProvider: MetadataProvider {
 /// Every provider the app knows about, in the order the wizard offers them.
 public enum MetadataProviders {
     public static func serving(_ kind: MediaKind, region: AudibleRegion = .unitedKingdom) -> [any MetadataProvider] {
-        [AudibleMetadataProvider(region: region), OpenLibraryProvider(), TMDBProvider()]
+        [AudibleMetadataProvider(region: region), OpenLibraryProvider(), TMDBProvider(), ITunesProvider()]
             .filter { $0.kinds.contains(kind) }
     }
 }
