@@ -71,3 +71,80 @@ struct MetadataRecordTests {
         #expect(record.tagSet.album == "Some Obscure Recording")
     }
 }
+
+@Suite("Query from a video filename")
+struct VideoFilenameQueryTests {
+    @Test("a scene-release episode name searches for the show, not the release tags")
+    func episodeReleaseName() {
+        let query = MetadataQuery(
+            from: TagSet(), filename: "Twin.Peaks.S01E01.Northwest.Passage.1080p.BluRay.x265-GROUP.mkv"
+        )
+        // TMDB's TV search takes a show name; everything after the SxxEyy is
+        // the episode title and the encoder's signature, and both make the
+        // search miss.
+        #expect(query.searchTerms == "Twin Peaks")
+        #expect(query.season == 1)
+        #expect(query.episode == 1)
+    }
+
+    @Test("the 1x01 spelling parses the same way")
+    func alternateEpisodeSpelling() {
+        let query = MetadataQuery(from: TagSet(), filename: "Twin Peaks 1x02 - Traces to Nowhere.mkv")
+        #expect(query.searchTerms == "Twin Peaks")
+        #expect(query.season == 1)
+        #expect(query.episode == 2)
+    }
+
+    @Test("a movie release name drops the release noise but keeps the year out of the terms")
+    func movieReleaseName() {
+        let query = MetadataQuery(
+            from: TagSet(), filename: "Twin.Peaks.Fire.Walk.with.Me.1992.1080p.BluRay.DTS.x264-AMIABLE.mkv"
+        )
+        #expect(query.searchTerms == "Twin Peaks Fire Walk with Me")
+        #expect(query.year == 1992)
+        #expect(query.season == nil)
+    }
+
+    @Test("every release term is stripped, not only the first in the list")
+    func allReleaseTermsStrip() {
+        // A formatter once ate the line continuations out of this pattern,
+        // leaving every term but the first two matchable only with padding.
+        for term in ["720p", "WEBRip", "HDTV", "x265", "DTS-HD", "10bit", "REMASTERED"] {
+            let query = MetadataQuery(from: TagSet(), filename: "Fire Walk with Me \(term) junk.mkv")
+            #expect(query.searchTerms == "Fire Walk with Me", "\(term) was not stripped")
+        }
+    }
+
+    @Test("a plain audiobook filename is unaffected by the video cleaning")
+    func audiobookNameUnchanged() {
+        let query = MetadataQuery(from: TagSet(), filename: "The Secret Diary of Laura Palmer.m4b")
+        #expect(query.searchTerms == "The Secret Diary of Laura Palmer")
+        #expect(query.season == nil)
+        #expect(query.year == nil)
+    }
+}
+
+@Suite("Ranking video results")
+struct VideoRankingTests {
+    private func candidate(_ title: String, year: Int?) -> MetadataCandidate {
+        MetadataCandidate(id: title, title: title, authors: [], narrators: [], year: year)
+    }
+
+    @Test("a year in the filename outranks TMDB's popularity order for a remake")
+    func yearBreaksTheTie() {
+        // Verified live: TMDB's /search/movie?query=Dune returns 2021 first,
+        // because it ranks by popularity. A file named Dune.1984 wants Lynch.
+        let results = [candidate("Dune", year: 2021), candidate("Dune", year: 1984)]
+        let query = MetadataQuery(from: TagSet(), filename: "Dune.1984.1080p.BluRay.x264.mkv")
+
+        #expect(query.ranked(results).first?.year == 1984)
+    }
+
+    @Test("with no year in the filename the provider's own order is kept")
+    func withoutAYearOrderIsUntouched() {
+        let results = [candidate("Dune", year: 2021), candidate("Dune", year: 1984)]
+        let query = MetadataQuery(from: TagSet(), filename: "Dune.mkv")
+
+        #expect(query.ranked(results).map(\.year) == [2021, 1984])
+    }
+}
