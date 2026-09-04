@@ -11,7 +11,7 @@ one side of a table only.
 | m4a, m4b, mp4, m4v, mov | ✅ tags, chapters, artwork | ✅ tags, chapters, artwork | AVFoundation read/write, `MPEG4ChapterWriter` |
 | mp3 | ✅ ID3v2 tags, artwork | ✅ ID3v2.4 tags, artwork | AVFoundation read, `ID3TagWriter` write |
 | wav, aiff | ✅ basic | ❌ | AVFoundation |
-| mkv | ✅ tags, chapters, cover attachments | ✅ tags (in-place patch) | `MatroskaReader` / `MatroskaTagWriter` |
+| mkv | ✅ tags, chapters, cover attachments, subtitle track metadata | ✅ tags, chapters, cover artwork, subtitle track metadata (in-place patch) | `MatroskaReader` / `MatroskaTagWriter` |
 | epub | ✅ tags, artwork, chapters (read-only) | ✅ tags, artwork | `EPUBReader` / `EPUBTagWriter` |
 | pdf | ✅ tags, artwork (preview only), chapters (read-only) | ✅ tags | `PDFReader` / `PDFTagWriter` |
 | flac, ogg, opus | ❌ listed only | ❌ | — |
@@ -125,6 +125,10 @@ the work, and they polluted the tag set until filtered.
 68CA     TargetTypeValue  63C5     TagTrackUID    67C8     SimpleTag
 45A3     TagName          4487     TagString      1941A469 Attachments
 61A7     AttachedFile     4660     FileMimeType   465C     FileData
+1654AE6B Tracks           AE       TrackEntry     73C5     TrackUID
+83       TrackType        86       CodecID        22B59C   Language
+22B59D   LanguageBCP47    536E     Name           88       FlagDefault
+55AA     FlagForced       B9       FlagEnabled
 ```
 
 Void (`EC`) is padding, legal anywhere, and the mechanism that makes in-place
@@ -154,6 +158,46 @@ why `EBMLWriter.size` can force a wider-than-minimal encoding.
 Ordering matters for crash safety: the new element is appended **before** the old
 one is blanked, so an interrupted write leaves the original element intact and
 the appended bytes outside the declared Segment, where they are ignored.
+
+Artwork writes the same way: one `AttachedFile` per cover inside `Attachments`
+(`cover.jpg`/`cover.png`, matching mkvpropedit/Jellyfin), planned and patched by
+the same three-case logic as `Tags`, independently — a tag-only write never
+touches an existing cover, and passing artwork never touches Tags. `Attachments`,
+`Tags`, `Chapters` and `Tracks` are four unrelated top-level elements, each with
+its own layout, adjacent `Void`, and `SeekHead` entry, all planned by the same
+generic `planElement` — a `Layout.slot(for:)` lookup is the only place that
+knows which id maps to which element.
+
+Chapters write as one `EditionEntry` holding one `ChapterAtom` per chapter —
+always a single default edition, matching what `MatroskaReader` already
+flattens every edition into on read. `chapters: [Chapter]?` distinguishes `nil`
+(caller never touched chapters — leave them) from `[]` (explicit: delete every
+chapter), the same contract `MediaTagReader.write` already uses for mp4.
+
+Subtitle track metadata (language, name, default/forced/enabled flags) is a
+fourth planned element, `Tracks` — but unlike Tags/Attachments/Chapters it is
+never fully regenerated: `Tracks` also holds video/audio TrackEntries and
+per-track binary blobs (`CodecPrivate`, an ASS style header or similar) that
+must survive byte-for-byte, per `AGENTS.md`'s lossless-round-trip rule.
+`MatroskaTagWriter.patchTracks` walks the existing `Tracks` body, byte-copying
+every TrackEntry untouched except ones matched by `SubtitleTrack.trackUID`;
+inside a matched entry, only the six known fields are replaced, every other
+child (including `CodecPrivate`) is copied verbatim. An edit whose `trackUID`
+matches nothing in the file is silently dropped — this writer edits tracks
+that exist, it does not mux new ones in. No add/remove of tracks is supported:
+that means rewriting every Cluster's block structure, a real remux this
+writer's whole design avoids.
+
+Planning more than one of these four elements in the same write surfaced a
+real bug worth naming: an element's "is this the last thing in the file?"
+check must compare against the *current* projected end of file
+(`plan.newLength ?? plan.fileLength`), not the original `fileLength` — if an
+earlier element in the same write already relocated and appended past the
+original end, a later element that used to be last no longer is, and comparing
+against the stale `fileLength` would overwrite it in place at a now-stale
+offset instead of relocating it too. Caught by a test that replaces both a
+pre-existing `Tags` and a pre-existing `Chapters` element in one call, both big
+enough to require relocation.
 
 ## Adding a format
 
