@@ -17,8 +17,13 @@ lone `%` with no closing delimiter is text, not a broken field.
 %track% %title%                          04 Laura Palmer's Theme
 %show% - S%season%E%episode% - %episodetitle%
 %title% (%year%)
+%title% (%year%) [tmdbid-%tmdbid%]       Fire Walk with Me (1992) [tmdbid-2667]
 %author% - %series% %seriesindex% - %title%
 ```
+
+The `[tmdbid-…]` bracket form is what Plex and Jellyfin read out of a
+filename, so a library named that way is understood by them without a
+separate lookup.
 
 Field names, as the sheet's **Field** menu lists them:
 
@@ -26,10 +31,18 @@ Field names, as the sheet's **Field** menu lists them:
 |---|---|
 | Music | `title` `artist` `albumartist` `album` `genre` `year` `track` `tracktotal` `disc` `disctotal` `comment` `composer` `grouping` |
 | Books and audiobooks | `author` `narrator` `series` `seriesindex` `publisher` `isbn` `asin` `language` `subtitle` |
-| Video | `show` `season` `episode` `episodetitle` `director` `studio` `rating` |
+| Video | `show` `season` `episode` `episodetitle` `director` `studio` `rating` `tmdbid` |
+| Any kind | `synopsis` |
 
 Anything else — `%mood%` — is a `TagKey.custom`, the same key an unmodelled
 frame round-trips through. It is not an error, and it works in both directions.
+
+That fallback is also the trap this table exists to prevent: a key OmniTag
+*does* model but which has no name here becomes `TagKey.custom` instead —
+a different key — so the pattern renders nothing for a file that plainly has
+the tag. `FilenamePatternTests.everyStandardFieldIsNameable` asserts every
+key in `TagKey.standardFields` has a name, so adding a key without one now
+fails the suite rather than shipping quietly.
 
 `track`, `tracktotal`, `disc`, `disctotal`, `season`, `episode` and
 `seriesindex` are counting numbers: zero-padded to two digits on the way out,
