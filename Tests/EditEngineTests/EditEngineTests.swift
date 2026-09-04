@@ -6,14 +6,25 @@ import Testing
 /// Records writes instead of touching disk: the engine's job is ordering,
 /// batching and undo, not I/O.
 actor SpyWriter: TagPersisting {
-    private(set) var writes: [(URL, TagSet, [Artwork], [Chapter]?)] = []
+    struct Write {
+        var url: URL
+        var tags: TagSet
+        var artwork: [Artwork]
+        var chapters: [Chapter]?
+        var subtitleTracks: [SubtitleTrack]?
+    }
+
+    private(set) var writes: [Write] = []
     var failing: Set<URL> = []
 
-    func write(_ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, to url: URL) async throws {
+    func write(
+        _ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?,
+        subtitleTracks: [SubtitleTrack]?, to url: URL
+    ) async throws {
         if failing.contains(url) {
             throw TagWriteError.refused(url)
         }
-        writes.append((url, tags, artwork, chapters))
+        writes.append(Write(url: url, tags: tags, artwork: artwork, chapters: chapters, subtitleTracks: subtitleTracks))
     }
 
     func fail(_ url: URL) {
@@ -21,11 +32,11 @@ actor SpyWriter: TagPersisting {
     }
 
     var writtenURLs: [URL] {
-        writes.map(\.0)
+        writes.map(\.url)
     }
 
     func lastWrite(for url: URL) -> TagSet? {
-        writes.last { $0.0 == url }?.1
+        writes.last { $0.url == url }?.tags
     }
 }
 
@@ -504,5 +515,40 @@ struct EditEngineKindAndChapterTests {
 
         await engine.redo()
         #expect(await engine.item(at: u1)?.chapters.count == 2)
+    }
+
+    @Test("applySubtitleTracks replaces the track list and supports undo/redo")
+    func applySubtitleTracksAndUndo() async {
+        let engine = EditEngine(writer: SpyWriter())
+        let u1 = url("a")
+        await engine.load([item("a")])
+
+        let tracks = [SubtitleTrack(trackUID: 1, codecID: "S_TEXT/UTF8", language: "eng", name: "English")]
+        await engine.applySubtitleTracks(tracks, to: u1)
+
+        #expect(await engine.item(at: u1)?.subtitleTracks == tracks)
+        #expect(await engine.canUndo)
+
+        await engine.undo()
+        #expect(await engine.item(at: u1)?.subtitleTracks == [])
+
+        await engine.redo()
+        #expect(await engine.item(at: u1)?.subtitleTracks == tracks)
+    }
+
+    @Test("save passes subtitle track edits through to the writer")
+    func saveWritesSubtitleTracks() async throws {
+        let writer = SpyWriter()
+        let engine = EditEngine(writer: writer)
+        let u1 = url("a")
+        await engine.load([item("a")])
+
+        let tracks = [SubtitleTrack(trackUID: 1, codecID: "S_TEXT/UTF8", language: "fre")]
+        await engine.applySubtitleTracks(tracks, to: u1)
+        _ = try await engine.save()
+
+        #expect(await writer.lastWrite(for: u1) != nil)
+        let lastSubtitleTracks = await writer.writes.last { $0.url == u1 }?.subtitleTracks
+        #expect(lastSubtitleTracks ?? [] == tracks)
     }
 }
