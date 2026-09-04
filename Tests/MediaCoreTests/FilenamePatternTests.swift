@@ -166,4 +166,34 @@ struct FilenamePatternTests {
         #expect(pattern.parse("A - B") == nil)
         #expect(pattern.parse("A - A")?.artist == "A")
     }
+
+    /// A modelled key with no `%name%` silently becomes `TagKey.custom` — a
+    /// *different* key — so the pattern renders nothing for a file that has
+    /// the tag, and parsing writes to a tag nothing else reads.
+    @Test("every modelled tag key has a placeholder name", arguments: MediaKind.allCases)
+    func everyStandardFieldIsNameable(kind: MediaKind) {
+        for (key, label) in TagKey.standardFields(for: kind) {
+            #expect(
+                FilenamePattern.vocabulary.contains { $0.key == key },
+                "\(label) (\(key)) has no %field% name"
+            )
+        }
+    }
+
+    @Test("a TMDB id renders into a name and parses back as the real key")
+    func tmdbIDRoundTrips() throws {
+        var tags = TagSet()
+        tags[.title] = .string("Fire Walk with Me")
+        tags[.year] = .number(1992)
+        tags[.tmdbID] = .string("2667")
+
+        let pattern = FilenamePattern("%title% (%year%) [tmdbid-%tmdbid%]")
+        let rendered = pattern.render(tags)
+        #expect(rendered.missing.isEmpty)
+        #expect(rendered.name == "Fire Walk with Me (1992) [tmdbid-2667]")
+
+        // Plex and Jellyfin both read this bracket form out of a filename.
+        let parsed = try #require(pattern.parse(rendered.name))
+        #expect(parsed[.tmdbID]?.stringValue == "2667")
+    }
 }
