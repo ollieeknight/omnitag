@@ -5,17 +5,28 @@ movies, TV. Mp3tag's job, wider scope, no cloud.
 
 ## State
 
-Phases 1–7: domain model, folder scan, MPEG-4 read/write, ID3 read/write, **Matroska
-read** (hand-written EBML parser) and **write** (in-place EBML patch),
-chapter read/write, **book formats** (EPUB read/write via custom `ZipArchive`, PDF via PDFKit),
-tag backups, undo/redo, batch editing, and a three-pane SwiftUI
-browser. **Metadata Providers** (Audible, Audnexus, OpenLibrary) are
-implemented — see `docs/ARCHITECTURE.md`. **Filename ↔ tag conversion** is in:
-rename a selection from a `%field%` pattern, or read tags back out of
-the names — see `docs/FILENAMES.md`.
+Reads and writes **MPEG-4** (m4a/m4b/mp4/mov/m4v), **mp3** (hand-rolled
+ID3v2.4), **Matroska** (hand-written EBML parser, and an in-place patch that
+never copies the file — 32 ms on a 6.5 GB film), **EPUB** (custom
+`ZipArchive` + OPF) and **PDF** (PDFKit).
+
+Beyond tags: **chapters** (MP4 and mkv), **cover art**, **mkv subtitle-track
+metadata**, **batch editing** with undo/redo that also reverses writes already
+on disk, **filename ↔ tag conversion** in both directions, and a **metadata
+wizard** with a field-by-field diff before anything is written.
+
+Every media kind has an online provider: Audible + Audnexus (audiobooks),
+OpenLibrary (books), TMDB (movies and TV, with a season/episode picker) and
+iTunes Search (music). All of it is optional — providers enrich, nothing
+depends on them, and the app is fully usable offline.
 
 Writes are staged: temp file in the same directory, re-read to prove it is
-playable, then an atomic swap, with the previous tags archived to JSON first (mkv is patched in place).
+playable, then an atomic swap, with the previous tags archived to JSON first
+(mkv is patched in place, outside the Clusters, for the reason above).
+
+Next up is throughput — find & replace, bulk transforms, audit views, saved
+actions — see `docs/ROADMAP.md` and the survey behind its ordering in
+`docs/COMPETITION.md`.
 
 ## Documentation
 
@@ -27,6 +38,9 @@ playable, then an atomic swap, with the previous tags archived to JSON first (mk
 | `docs/FORMATS.md` | every tag, and the atom or frame it lives in |
 | `docs/ARCHITECTURE.md` | modules, stack rationale, phases |
 | `docs/DECISIONS.md` | settled questions and why |
+| `docs/COMPETITION.md` | what rival tools ship, and the gaps that ranks |
+| `docs/UI.md` | the main window: scopes, columns, chrome, empty states |
+| `docs/MUSIC.md` | the iTunes provider and the album-safe multi-file guard |
 | `docs/DEVELOPMENT.md` | build, test, Xcode, real-media testing |
 | `docs/AUDIOBOOKS.md` | Audible/Audnexus APIs, wizard, chapters, playback |
 | `docs/BOOKS.md` | EPUB/PDF, ZipArchive, OpenLibrary provider |
