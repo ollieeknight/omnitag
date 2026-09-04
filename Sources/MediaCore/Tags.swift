@@ -30,10 +30,28 @@ public enum TagKey: Sendable, Hashable, Codable {
              (.studio, "Studio"), (.genre, "Genre"), (.contentRating, "Rating"),
              (.synopsis, "Synopsis"), (.tmdbID, "TMDB ID")]
         case .tvEpisode:
-            [(.showName, "Show"), (.seasonNumber, "Season"), (.episodeNumber, "Episode"),
-             (.episodeTitle, "Episode Title"), (.year, "Year"), (.director, "Director"),
-             (.genre, "Genre"), (.tmdbID, "TMDB ID")]
+            [(.title, "Title"), (.showName, "Show"), (.seasonNumber, "Season"),
+             (.episodeNumber, "Episode"), (.episodeTitle, "Episode Title"),
+             (.year, "Year"), (.director, "Director"), (.genre, "Genre"),
+             (.synopsis, "Synopsis"), (.tmdbID, "TMDB ID")]
         }
+    }
+
+    /// The display name for a field, wherever one is shown — the wizard's tag
+    /// table, the inspector, the rename sheet. `standardFields` is the source:
+    /// deriving a label from the enum case name instead gives "Tmdb Id".
+    public static func label(for key: TagKey) -> String {
+        if case let .custom(name) = key {
+            return name.capitalized
+        }
+        for kind in MediaKind.allCases {
+            if let match = standardFields(for: kind).first(where: { $0.key == key }) {
+                return match.label
+            }
+        }
+        return String(describing: key)
+            .replacing(#/([a-z])([A-Z])/#) { "\($0.output.1) \($0.output.2)" }
+            .capitalized
     }
 }
 
