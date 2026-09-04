@@ -123,6 +123,39 @@ struct RenameTests {
         #expect(await engine.item(at: item.url) == nil)
     }
 
+    @Test("undoing two renames of the same file walks it back one hop at a time")
+    func undoSequentialRenames() async throws {
+        let dir = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile("01.m4a", in: dir, title: "Theme", artist: "Badalamenti")
+        let engine = EditEngine(writer: SpyWriter())
+        await engine.load([item])
+
+        let a = item.url
+        let b = dir.appending(path: "B.m4a")
+        let c = dir.appending(path: "C.m4a")
+        let d = dir.appending(path: "D.m4a")
+
+        _ = await engine.rename([RenameMove(from: a, to: b)])
+        _ = await engine.rename([RenameMove(from: b, to: c)])
+
+        // Every path that moves a file re-keys the history, so an older step's
+        // destination always tracks where the file actually is. This walks that
+        // invariant through an undo and a further rename to pin it down.
+        await engine.undo()
+        #expect(FileManager.default.fileExists(atPath: b.path))
+        _ = await engine.rename([RenameMove(from: b, to: d)])
+        await engine.undo()
+
+        #expect(FileManager.default.fileExists(atPath: b.path))
+        await engine.undo()
+
+        #expect(FileManager.default.fileExists(atPath: a.path))
+        #expect(FileManager.default.fileExists(atPath: b.path) == false)
+        #expect(FileManager.default.fileExists(atPath: d.path) == false)
+        #expect(await engine.item(at: a) != nil)
+    }
+
     @Test("undo moves the file back and restores its old identity")
     func undoRename() async throws {
         let dir = try makeFolder()
