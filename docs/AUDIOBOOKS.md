@@ -181,4 +181,128 @@ summary. **Audio playback**: native `AVPlayer` transport bar. **In-place chapter
 editing**: full inspector studio. **Kind triage**: drag-and-drop and context menu
 reassignment.
 
-Next: mkv chapter editing and library persistence between launches.
+Both items this section once named as next — mkv chapter editing and library
+persistence between launches — are done; see `MOVIES_TV.md` and `STATUS.md`.
+
+
+## Chapter titles: what the heuristics get wrong, and why
+
+Measured against a real 50-book library (Horus Heresy, ffmpeg-merged from
+parts, chapter titles in every state from `Chapter 1` to fully written out).
+
+### There is no richer source to fetch
+
+Checked before changing anything: Audnexus **does** publish chapter data for
+these books, and its timings match the files exactly. But its titles are
+`Opening Credits`, `Part One`, `One`, `Two`, `Three` — no richer than the
+files' own `Chapter 1, Chapter 2`. Occasionally a part carries a real name
+(`Part Two: Plague Moon`).
+
+That is not a gap in the API. **The audiobooks genuinely do not have rich
+chapter titles** — the publisher numbered them. So for the 23 books whose
+titles are all generic, the generic titles are *correct*, and there is
+nothing to fetch. Books that do have real titles got them from whoever built
+the file, which is data no provider can reconstruct — and precisely why
+protecting them matters more than replacing them.
+
+Two things Audnexus has that OmniTag does not yet use: structural markers
+(`Opening Credits`, `End Credits`) and `brandIntroDurationMs`, which says
+where publisher branding ends.
+
+### The ratio was backwards
+
+`hasRichTitles` required 20% of titles to be non-generic. Three real titles
+among twenty-eight generic ones scored 11% and were **silently overwritten**
+— yet those three are exactly the ones that cannot be recovered. A mostly
+numbered book is *more* fragile than a fully written-out one, not less.
+
+Nine of fifty books were mis-classified this way, including *Fear to Tread*
+(`Melchior`, `Ullanor`, `Nikaea`), *Fulgrim* (`Part I`–`Part V`) and *The
+Master of Mankind* (`Harvest`, `Cargo`, `Choir`).
+
+Now: **any** non-generic title protects the list, and the notice names the
+titles at risk rather than only saying some exist — with three real titles in
+a twenty-four-row table, "this file has written-out titles" does not tell you
+which three to look at.
+
+### `Part I` is not `Part 1`
+
+`part` and `book` are in `genericWords`, so `Part I` and `Book II` were
+judged generic. In several books those are the *only* structural markers the
+file has. A Roman numeral after a structural word now reads as real; a plain
+digit (`Part 4`) still reads as generic, because that is reconstructible.
+
+## When the chapter counts do not match
+
+`ChapterDiff.matchTitles` pairs by **timestamp, not index**: nearest provider
+chapter within 120 s, requiring the two durations to be within 2× of each
+other, never reusing a provider chapter. The file's timings always win, and
+only titles move. On a 21-vs-25 mismatch the four extra provider chapters are
+dropped rather than shifting everything by four.
+
+The notice now reports what the alignment actually achieved — "21 matched by
+timestamp, 3 chapters kept their current title" — rather than promising a
+match it may not have made.
+
+## Are the chapter boundaries even correct?
+
+A question no provider can answer — nobody publishes where a *particular
+rip's* chapters should fall. The audio is the only witness, but it has to be
+read carefully, because **there is more than one correct shape**. Two books
+from the developer's library, both correct, look completely different:
+
+```
+Horus Rising          A Thousand Sons
+  prose                 prose
+  [silence 4.5s]        [pause 2.5s]
+  ▸ mark (2s in)        ▸ mark — on a spoken "Chapter Two"
+  next chapter          [pause 2.0s]
+                        next chapter
+```
+
+A Thousand Sons puts its marks **on the announcement**, deliberately, so that
+skipping plays "Chapter Two" and then the text. A silence-only checker calls
+every one of those wrong — which is worse than no checker, because it teaches
+the user to ignore it.
+
+So `ChapterBoundaryCheck` (`TagIO`) **reports the shape and does not pass
+judgement**. For each mark it says how long the previous audio had already
+stopped and how soon sound resumes, and produces a plain sentence:
+
+| Real output | Meaning |
+|---|---|
+| `On audio, 2.8s after a pause — likely a chapter announcement.` | A Thousand Sons: correct |
+| `In a pause, 2.0s after the previous audio ended.` | Horus Rising: 2 s of dead air on every skip |
+| `Mid-sentence. Nearest pause +2.0s.` | The one unambiguous fault |
+
+Only `isMidSentence` is a claim — audio at the mark with no pause either side,
+so the mark cuts a sentence in half. Everything else is description.
+
+### What the measurements had to survive
+
+- **Threshold.** Silence measures 0.0000–0.0005, speech 0.05–0.19. Two orders
+  of magnitude apart, so 0.002 is not a fine judgement.
+- **Window width.** A one-second RMS window straddles the moment sound
+  resumes, so it averaged in the following speech and called *every* boundary
+  of a correctly cut book mid-sentence. A quarter-second measures the mark
+  itself.
+- **Search width.** ±60 s always finds *a* silence — every paragraph break is
+  one — and produced suggestions of −57 s and +34 s in the same book. ±10 s
+  matches the real error.
+- **Walking past the mark's own audio.** The pause that matters is the one
+  *before* a chapter announcement, so the backward scan skips up to 2.5 s of
+  sound before measuring. Without this, every announcement read as
+  mid-sentence.
+
+No dependency: `AVAssetReader` decodes and the rest is a root-mean-square.
+Fingerprinting is not needed to ask "is this quiet". The check is advisory —
+an unreadable file returns no results rather than throwing, and nothing about
+it blocks editing chapters by hand.
+
+### Measured against the real library
+
+Ground truths (confirmed correct by the developer): **A Thousand Sons** — 31
+boundaries, 0 faults, announcement structure correctly identified.
+**Horus Rising** — 21 boundaries, 0 faults, every one reported as sitting
+~2 s into the pause, which is the bleed-through the developer had noticed by
+ear. **Deathfire** — 67 boundaries, same 2 s pattern.
