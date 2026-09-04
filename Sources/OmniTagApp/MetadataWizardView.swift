@@ -11,15 +11,17 @@ public enum SearchLayout: String, CaseIterable, Identifiable {
 }
 
 public struct MetadataWizardView: View {
-    @State private var model: MetadataWizardModel
-    @Environment(\.dismiss) private var dismiss
+    // Not `private`: the chapters and summary steps live in
+    // MetadataWizardSteps.swift, and `private` is file-scoped.
+    @State var model: MetadataWizardModel
+    @Environment(\.dismiss) var dismiss
     @AppStorage("audiobookWizardSearchLayout") private var searchLayout: SearchLayout = .grid
 
-    private let applyAction: (TagSet, [Artwork], [Chapter]?, Set<TagKey>) async -> Void
+    private let applyAction: (TagSet, [Artwork], [Chapter]?, Set<TagKey>, MediaKind?) async -> Void
 
     public init(
         items: [MediaItem], kind: MediaKind = .audiobook,
-        applyAction: @escaping (TagSet, [Artwork], [Chapter]?, Set<TagKey>) async -> Void
+        applyAction: @escaping (TagSet, [Artwork], [Chapter]?, Set<TagKey>, MediaKind?) async -> Void
     ) {
         _model = State(initialValue: MetadataWizardModel(items: items, kind: kind))
         self.applyAction = applyAction
@@ -137,7 +139,7 @@ public struct MetadataWizardView: View {
         defer { model.isApplying = false }
         do {
             let (tags, artwork, chapters, clearing) = try await model.buildSnapshot()
-            await applyAction(tags, artwork, chapters, clearing)
+            await applyAction(tags, artwork, chapters, clearing, model.reclassifiedKind)
             dismiss()
         } catch {
             // Stay on the summary: the user's review is worth more than the sheet.
@@ -161,11 +163,34 @@ public struct MetadataWizardView: View {
     private var searchStep: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
+                // Movie or TV is a real choice, not merely whichever sidebar
+                // tab happened to be open. Changing it re-runs the search:
+                // TMDB serves the two from different endpoints, so results
+                // from one mean nothing under the other.
+                if model.offersKindChoice {
+                    Picker("Looking for", selection: $model.kind) {
+                        Text("Movie").tag(MediaKind.movie)
+                        Text("TV").tag(MediaKind.tvEpisode)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .onChange(of: model.kind) {
+                        guard !model.query.isEmpty else { return }
+                        Task { await model.search() }
+                    }
+                    .help("Which catalogue to search. Applying a result also files the file under this kind.")
+                }
+
                 HStack(spacing: 6) {
                     Image(systemName: model.query.asin == nil ? "magnifyingglass" : "barcode.viewfinder")
                         .foregroundStyle(model.query.asin == nil ? .secondary : Color.accentColor)
                     TextField(model.searchHint, text: $model.query.searchText)
                         .textFieldStyle(.plain)
+                        // Claim the empty space in the faux search box, so a
+                        // click to the right of the text focuses the field
+                        // instead of landing on the container behind it.
+                        .frame(maxWidth: .infinity)
                         .onSubmit { Task { await model.search() } }
                         .accessibilityLabel("Search \(model.provider?.name ?? "for metadata")")
                     if model.query.asin != nil {
@@ -237,10 +262,22 @@ public struct MetadataWizardView: View {
     private var results: some View {
         switch model.searchState {
         case .idle:
-            ContentUnavailableView(
-                "Search \(model.provider?.name ?? "for Metadata")", systemImage: "books.vertical",
-                description: Text("The query was built from the file's own tags. Edit it above, or paste an Audible link.")
-            )
+            if model.needsAPIKey {
+                ContentUnavailableView {
+                    Label("\(model.provider?.name ?? "This provider") Needs a Key", systemImage: "key")
+                } description: {
+                    Text("Searching \(model.provider?.name ?? "this provider") needs a free API key. Add one in Preferences, then come back.")
+                } actions: {
+                    SettingsLink { Text("Open Preferences…") }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else {
+                ContentUnavailableView(
+                    "Search \(model.provider?.name ?? "for Metadata")",
+                    systemImage: model.provider?.hasEpisodePicker == true ? "film" : "books.vertical",
+                    description: Text(model.searchPrompt)
+                )
+            }
         case .searching:
             ProgressView("Searching \(model.provider?.name ?? "")…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -257,12 +294,19 @@ public struct MetadataWizardView: View {
             }
         case let .error(message):
             ContentUnavailableView {
-                Label("Search Failed", systemImage: "exclamationmark.triangle")
+                Label(model.needsAPIKey ? "No API Key" : "Search Failed", systemImage: model.needsAPIKey ? "key" : "exclamationmark.triangle")
             } description: {
                 Text(message)
             } actions: {
-                Button("Try Again") { Task { await model.search() } }
-                    .buttonStyle(.borderedProminent)
+                // Retrying a search that failed for want of a key just fails
+                // again; the only useful action is the one that fixes it.
+                if model.needsAPIKey {
+                    SettingsLink { Text("Open Preferences…") }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Try Again") { Task { await model.search() } }
+                        .buttonStyle(.borderedProminent)
+                }
             }
         case let .results(candidates):
             ScrollView {
@@ -285,7 +329,7 @@ public struct MetadataWizardView: View {
     }
 
     /// A square placeholder keeps the grid from reflowing as covers arrive.
-    private func cover(_ url: URL?, size: CGFloat? = nil) -> some View {
+    func cover(_ url: URL?, size: CGFloat? = nil) -> some View {
         AsyncImage(url: url) { image in
             image.resizable().scaledToFit()
         } placeholder: {
@@ -409,10 +453,10 @@ public struct MetadataWizardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.windowBackgroundColor))
         }
+        // The one place a season is fetched: on appearing, on every season
+        // change, and on stepping Back into this view.
         .task(id: model.selectedSeason) {
-            if case .idle = model.episodeLoadState {
-                await model.loadSeasonEpisodes()
-            }
+            await model.loadSeasonEpisodes()
         }
     }
 
@@ -438,6 +482,7 @@ public struct MetadataWizardView: View {
                 ContentUnavailableView("No Episodes", systemImage: "tv", description: Text("Season \(model.selectedSeason) has no episodes listed."))
             } else {
                 List(episodes) { episode in
+                    let suggested = episode.number == model.suggestedEpisode
                     Button {
                         Task { await model.selectEpisode(episode) }
                     } label: {
@@ -446,6 +491,13 @@ public struct MetadataWizardView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(width: 32, alignment: .trailing)
                             Text(episode.title)
+                                .fontWeight(suggested ? .semibold : .regular)
+                            if suggested {
+                                Text("From filename")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.15), in: .capsule)
+                            }
                             Spacer()
                             if let airDate = episode.airDate {
                                 Text(airDate).font(.caption).foregroundStyle(.secondary)
@@ -455,6 +507,7 @@ public struct MetadataWizardView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityHint(suggested ? "Matches the season and episode in this file's name" : "")
                 }
                 .listStyle(.inset)
             }
@@ -612,9 +665,13 @@ public struct MetadataWizardView: View {
                         .textFieldStyle(.plain)
                         .lineLimit(1 ... 4)
                         .padding(6)
+                        // The padding belongs to the modified view, not the
+                        // plain field, so without this the click target was
+                        // only the glyphs. Typing into an unticked empty row
+                        // now ticks it, rather than being ignored outright.
+                        .contentShape(.rect(cornerRadius: 6))
                         .background(Color(NSColor.textBackgroundColor), in: .rect(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                        .disabled(!isOn && row.wrappedValue.proposed == nil)
                         .foregroundStyle(isOn ? .primary : .tertiary)
                         .accessibilityLabel("New \(label(for: key))")
 
@@ -650,251 +707,6 @@ public struct MetadataWizardView: View {
     }
 
     private func label(for key: TagKey) -> String {
-        if case let .custom(name) = key {
-            return name.capitalized
-        }
-        let raw = String(describing: key)
-        return raw.replacing(#/([a-z])([A-Z])/#) { "\($0.output.1) \($0.output.2)" }
-            .capitalized
-    }
-
-    // MARK: - Step 3: Chapters
-
-    private var chaptersStep: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Toggle("Update chapters", isOn: Binding(
-                    get: { !model.skipChapters },
-                    set: { model.skipChapters = !$0 }
-                ))
-                .toggleStyle(.switch)
-                .help("Off leaves the file's chapters exactly as they are")
-
-                Menu {
-                    Section("Rename every chapter") {
-                        ForEach(MetadataWizardModel.renamePatterns, id: \.self) { pattern in
-                            Button(pattern) { model.renameChapters(with: pattern) }
-                        }
-                    }
-                    Divider()
-                    Button("Reset to the provider's titles") { model.resetChapters() }
-                } label: {
-                    Label("Bulk Tools", systemImage: "wand.and.rays")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .disabled(model.skipChapters)
-                .help("Retitle all \(model.chapterDiff.rows.count) chapters at once")
-
-                Divider().frame(height: 16)
-
-                Button { model.shiftProposedTitles(by: -1) } label: {
-                    Image(systemName: "arrow.up")
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.selectedChapterIDs.isEmpty || model.skipChapters)
-                .help("Move the selected titles up a row")
-
-                Button { model.shiftProposedTitles(by: 1) } label: {
-                    Image(systemName: "arrow.down")
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.selectedChapterIDs.isEmpty || model.skipChapters)
-                .help("Move the selected titles down a row")
-
-                Spacer()
-
-                Text(model.skipChapters
-                    ? "Chapters untouched"
-                    : "^[\(model.chapterDiff.resolved.count) chapter](inflect: true) will be written")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
-            .glassEffect(.regular)
-
-            if let notice = model.chapterNotice {
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle").foregroundStyle(.secondary)
-                    Text(notice).font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-            }
-
-            Divider()
-
-            HStack(spacing: 12) {
-                Text("#").frame(width: 36, alignment: .trailing)
-                Text("Start").frame(width: 80, alignment: .leading)
-                Text("Currently").frame(maxWidth: .infinity, alignment: .leading)
-                Text("New Title").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.caption.bold())
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(Color(NSColor.controlBackgroundColor))
-
-            Divider()
-
-            List(selection: $model.selectedChapterIDs) {
-                ForEach($model.chapterDiff.rows) { $row in
-                    chapterRow($row)
-                        .tag(row.id)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-
-                    Divider().padding(.leading, 16)
-                }
-            }
-            .listStyle(.plain)
-            .background(Color(NSColor.underPageBackgroundColor))
-        }
-    }
-
-    @ViewBuilder
-    private func chapterRow(_ row: Binding<ChapterDiff.Row>) -> some View {
-        let changed = row.wrappedValue.proposed?.title != row.wrappedValue.current?.title
-
-        HStack(spacing: 12) {
-            Text("\(row.wrappedValue.index + 1)")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .frame(width: 36, alignment: .trailing)
-
-            Text(row.wrappedValue.proposed.map { LibraryView.formatted($0.start) } ?? "—")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 80, alignment: .leading)
-
-            Text(row.wrappedValue.current?.title ?? "—")
-                .foregroundStyle(row.wrappedValue.current == nil ? .tertiary : .secondary)
-                .strikethrough(changed && row.wrappedValue.current != nil)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if row.wrappedValue.proposed != nil {
-                TextField("Title", text: Binding(
-                    get: { row.wrappedValue.proposed?.title ?? "" },
-                    set: { row.wrappedValue.proposed?.title = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .padding(6)
-                .background(Color(NSColor.textBackgroundColor), in: .rect(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("Title for chapter \(row.wrappedValue.index + 1)")
-            } else {
-                Text("Dropped")
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(changed ? Color.accentColor.opacity(0.06) : .clear)
-    }
-
-    // MARK: - Step 4: Summary
-
-    private var summaryStep: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                cover(model.candidate?.artworkURL ?? model.details?.book.artworkURL)
-                    .frame(maxWidth: 180)
-
-                VStack(spacing: 6) {
-                    Text(model.candidate?.title ?? "Ready to Apply")
-                        .font(.title2.bold())
-                        .multilineTextAlignment(.center)
-                    Text("Edits stay in memory until you press Save, and Undo takes them all back in one step.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                HStack(spacing: 0) {
-                    summaryTile("\(model.changedTagCount)", "Fields changed")
-                    Divider().frame(height: 40)
-                    summaryTile(
-                        model.willWriteChapters ? "\(model.chapterDiff.resolved.count)" : "—",
-                        "Chapters"
-                    )
-                    Divider().frame(height: 40)
-                    summaryTile("\(model.selectedItems.count)", "Files")
-                }
-                .padding(.vertical, 12)
-                .frame(maxWidth: 460)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.6), in: .rect(cornerRadius: 12))
-
-                if model.skipChapters {
-                    Label(
-                        "Chapters are skipped: existing file chapters will remain untouched.",
-                        systemImage: "info.circle"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 460)
-                } else if model.hasProviderChapters, !model.canWriteChapters {
-                    Label(
-                        "Chapters are skipped: \(model.selectedItems.count) files are selected, and one book's chapter list does not belong in every part.",
-                        systemImage: "info.circle"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 460)
-                }
-
-                if model.hasUnwritableArtwork {
-                    Label(
-                        "Cover art is skipped: mkv has no artwork writer yet, so the poster will not be saved.",
-                        systemImage: "info.circle"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 460)
-                }
-
-                if model.cleanOverwrite, !model.clearingTagKeys.isEmpty {
-                    Label(
-                        "Clean overwrite: \(model.clearingTagKeys.count) unprovided tags will be removed from file.",
-                        systemImage: "sparkles"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 460)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(model.selectedItems.prefix(6), id: \.url) { item in
-                        Text(item.url.lastPathComponent)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    if model.selectedItems.count > 6 {
-                        Text("and \(model.selectedItems.count - 6) more…")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(maxWidth: 460, alignment: .leading)
-            }
-            .padding(32)
-            .frame(maxWidth: .infinity)
-        }
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-
-    private func summaryTile(_ value: String, _ caption: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.title.bold().monospacedDigit())
-            Text(caption).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        TagKey.label(for: key)
     }
 }
