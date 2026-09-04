@@ -62,7 +62,41 @@ public final class MetadataWizardModel {
     /// names a service itself — a book tab simply has different providers in it.
     public private(set) var providers: [any MetadataProvider] = []
     public var provider: (any MetadataProvider)?
-    public let kind: MediaKind
+    /// What the wizard is looking for — settable, because "movie or TV" is a
+    /// real choice and not merely which sidebar tab was open. Changing it
+    /// throws away everything downstream: the two are different TMDB
+    /// endpoints, so results, candidate and episode flow from one are
+    /// meaningless under the other.
+    public var kind: MediaKind {
+        didSet {
+            guard kind != oldValue else { return }
+            candidate = nil
+            details = nil
+            isEpisodeFlow = false
+            episodeLoadState = .idle
+            searchState = .idle
+            step = .search
+            rebuildProviders()
+        }
+    }
+
+    /// The kind the files were filed under when the wizard opened, so a
+    /// changed choice can be written back on apply.
+    private let originalKind: MediaKind
+
+    /// Movie and TV are the one pair a user genuinely picks between — an
+    /// audiobook is never a film. Shown only where the choice is real.
+    public var offersKindChoice: Bool {
+        [.movie, .tvEpisode].contains(originalKind)
+    }
+
+    /// The kind to reclassify the selection to on apply, or `nil` when the
+    /// files already agree with the choice. A file must not leave the wizard
+    /// tagged as one kind while the library files it as another.
+    public var reclassifiedKind: MediaKind? {
+        guard offersKindChoice else { return nil }
+        return selectedItems.contains { $0.kind != kind } ? kind : nil
+    }
 
     public var query = MetadataQuery()
     public var selectedItems: [MediaItem]
@@ -78,11 +112,15 @@ public final class MetadataWizardModel {
     /// the episode list straight to Search, silently losing the show and the
     /// picked episode both. See `docs/MOVIES_TV.md`.
     public private(set) var isEpisodeFlow = false
-    public var selectedSeason = 1 {
-        didSet {
-            guard selectedSeason != oldValue else { return }
-            Task { await loadSeasonEpisodes() }
-        }
+    /// The episode step's `.task(id: selectedSeason)` is the only thing that
+    /// fetches a season — a `didSet` here as well meant selecting a show while
+    /// a non-default season was showing fired two races for one list.
+    public var selectedSeason = 1
+
+    /// The episode number the file's own name points at, if any — the picker
+    /// marks that row so a season of 22 does not have to be read to find it.
+    public var suggestedEpisode: Int? {
+        query.episode
     }
 
     public var episodeLoadState: EpisodeLoadState = .idle
@@ -156,6 +194,7 @@ public final class MetadataWizardModel {
     ) {
         selectedItems = items
         self.kind = kind
+        originalKind = kind
         self.downloader = downloader
         if let first = items.first {
             query = MetadataQuery(from: first.tags, filename: first.url.lastPathComponent)
@@ -179,6 +218,20 @@ public final class MetadataWizardModel {
         provider?.searchHint ?? "Search"
     }
 
+    /// What the empty search step says before anything is typed. The audiobook
+    /// wording ("paste an Audible link") is meaningless on a movie or TV tab.
+    public var searchPrompt: String {
+        provider is AudibleMetadataProvider
+            ? "The query was built from the file's own tags and name. Edit it above, or paste an Audible link."
+            : "The query was built from the file's own tags and name. Edit it above and press Return."
+    }
+
+    /// True when the chosen provider needs a key it has not been given —
+    /// worth saying before a search is typed and fails, not after.
+    public var needsAPIKey: Bool {
+        provider?.isMissingAPIKey ?? false
+    }
+
     /// One book's chapters split across twenty part files would give every part
     /// the whole book's chapter list, so chapters are a single-file operation.
     public var canWriteChapters: Bool {
@@ -192,6 +245,20 @@ public final class MetadataWizardModel {
         selectedItems.count == 1
     }
 
+    /// Fields that identify one *track*, not the release it belongs to.
+    ///
+    /// A music selection is usually a whole album, and the wizard applies one
+    /// result to everything selected — so writing these would stamp one song's
+    /// title and number onto every file. Same reasoning as `canWriteChapters`
+    /// and `canPickEpisode`, and the same single-file condition.
+    public static let perTrackKeys: Set<TagKey> = [.title, .trackNumber, .trackTotal, .discNumber, .discTotal]
+
+    /// True when the result names one track but more than one file would
+    /// receive it, so the per-track fields have to be withheld.
+    public var withholdsPerTrackFields: Bool {
+        kind == .music && selectedItems.count > 1
+    }
+
     public var hasProviderChapters: Bool {
         !(details?.chapters.isEmpty ?? true)
     }
@@ -202,10 +269,8 @@ public final class MetadataWizardModel {
         hasProviderChapters && canWriteChapters && !skipChapters
     }
 
-    /// mkv has no artwork writer yet (`MatroskaTagWriter.write` takes no
-    /// artwork parameter — see `docs/STATUS.md`), so a downloaded cover would
-    /// otherwise vanish with no error and no explanation. True only when
-    /// every selected file could actually receive it.
+    /// True only when every selected file could actually receive artwork —
+    /// e.g. a PDF cover is a page-one render, never stored art.
     public var canWriteArtwork: Bool {
         !selectedItems.isEmpty && selectedItems.allSatisfy { MediaTagReader.canWriteArtwork($0.container) }
     }
@@ -253,7 +318,7 @@ public final class MetadataWizardModel {
         }
         searchState = .searching
         do {
-            let candidates = try await provider.search(query, kind: kind, limit: 20)
+            let candidates = try await query.ranked(provider.search(query, kind: kind, limit: 20))
             lastResults = candidates
             searchState = candidates.isEmpty
                 ? .empty(emptyHint(for: provider))
@@ -288,8 +353,13 @@ public final class MetadataWizardModel {
                 isEpisodeFlow = true
                 searchState = lastResults.isEmpty ? .results([candidate]) : .results(lastResults)
                 step = .episode
-                selectedSeason = 1
-                await loadSeasonEpisodes()
+                // Open on the season the filename named, falling back to 1,
+                // and `.idle` so a second show never shows the first one's
+                // episodes. The episode step's `.task(id: selectedSeason)`
+                // does the fetch.
+                selectedSeason = query.season ?? 1
+                episodeLoadState = .idle
+                loadedSeason = nil
                 return
             }
 
@@ -305,14 +375,23 @@ public final class MetadataWizardModel {
         }
     }
 
+    /// What `episodeLoadState` currently holds, so stepping Back into the
+    /// episode step does not refetch a list already on screen.
+    private var loadedSeason: (showID: String, season: Int)?
+
     /// The episode step's list, refetched whenever `selectedSeason` changes.
     public func loadSeasonEpisodes() async {
         guard let tmdb = provider as? TMDBProvider, let showID = candidate?.id else { return }
+        if let loadedSeason, loadedSeason == (showID, selectedSeason) {
+            return
+        }
         episodeLoadState = .loading
         do {
             let episodes = try await tmdb.seasonEpisodes(showID: showID, season: selectedSeason)
+            loadedSeason = (showID, selectedSeason)
             episodeLoadState = .loaded(episodes)
         } catch {
+            loadedSeason = nil
             episodeLoadState = .error(error.localizedDescription)
         }
     }
@@ -348,7 +427,15 @@ public final class MetadataWizardModel {
         self.details = details
 
         let currentTags = TagSet.common(of: selectedItems.map(\.tags))
-        tagDiff = TagDiff(current: currentTags, proposed: details.book.tagSet, kind: kind)
+        var proposed = details.book.tagSet
+        if withholdsPerTrackFields {
+            // Removed rather than left unticked: a row the user could tick
+            // would put one song's title back onto the whole album.
+            for key in Self.perTrackKeys {
+                proposed[key] = nil
+            }
+        }
+        tagDiff = TagDiff(current: currentTags, proposed: proposed, kind: kind)
         cleanOverwrite = true
         // In clean overwrite, all proposed keys are written and unprovided current keys are cleared:
         selectedTagKeys = Set(tagDiff.rows.filter { $0.proposed != nil || $0.current != nil }.map(\.key))
@@ -379,15 +466,25 @@ public final class MetadataWizardModel {
     /// case where doing nothing is the better default.
     static func chapterDefault(file: [Chapter], provider: [Chapter]) -> (skip: Bool, notice: String?) {
         guard !provider.isEmpty else { return (false, nil) }
-        if ChapterDiff.hasRichTitles(file), !ChapterDiff.hasRichTitles(provider) {
-            let sample = file.first { !ChapterDiff.isGeneric(title: $0.title) }?.title
-            return (true, "This file already has written-out chapter titles"
-                + (sample.map { " (\"\($0)\")" } ?? "")
-                + " and the provider only has numbered ones, so chapters start skipped.")
+
+        // Protecting titles that cannot be recovered comes first.
+        let protection = ChapterDiff.protectionNotice(file: file, provider: provider)
+        if protection.skip {
+            return protection
         }
+
         if file.count >= 2, file.count != provider.count {
-            return (false, "The file has \(file.count) chapters and the provider \(provider.count). "
-                + "Your timings are kept; titles are matched by timestamp.")
+            // Say what the alignment actually achieved, not just that the
+            // counts differ: "titles are matched by timestamp" is a promise,
+            // and the user deserves to know how much of it was kept.
+            let matched = ChapterDiff.matchedCount(fileChapters: file, providerChapters: provider)
+            let unmatched = file.count - matched
+            var notice = "The file has \(file.count) chapters and the provider \(provider.count). "
+                + "Your timings are kept; \(matched) matched by timestamp"
+            notice += unmatched == 0
+                ? "."
+                : ", and ^[\(unmatched) chapter](inflect: true) kept its current title."
+            return (false, notice)
         }
         return (false, nil)
     }
