@@ -5,7 +5,58 @@ import TagIO
 /// What the engine needs from a writer. Narrow on purpose: the UI can be tested
 /// without touching disk, and a per-format writer only has to satisfy this.
 public protocol TagPersisting: Sendable {
-    func write(_ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, to url: URL) async throws
+    func write(
+        _ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?,
+        subtitleTracks: [SubtitleTrack]?, to url: URL
+    ) async throws
+}
+
+/// A text transform over one field's existing value. The steps a saved
+/// action is built from — see `ROADMAP.md` item 2.
+public enum TextTransform: String, Sendable, Equatable, CaseIterable, Identifiable {
+    case titleCase = "Title Case"
+    case upperCase = "UPPER CASE"
+    case lowerCase = "lower case"
+    case sentenceCase = "Sentence case"
+    case trimWhitespace = "Trim Whitespace"
+
+    public var id: String {
+        rawValue
+    }
+
+    /// Words a title leaves lowercase unless they start it. Deliberately
+    /// short: an aggressive list mangles real titles more often than it helps.
+    private static let smallWords: Set = [
+        "a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "nor",
+        "of", "on", "or", "the", "to", "with"
+    ]
+
+    func applied(to text: String) -> String {
+        switch self {
+        case .upperCase:
+            text.uppercased()
+        case .lowerCase:
+            text.lowercased()
+        case .trimWhitespace:
+            text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        case .sentenceCase:
+            text.lowercased().prefix(1).uppercased() + text.lowercased().dropFirst()
+        case .titleCase:
+            Self.titleCased(text)
+        }
+    }
+
+    private static func titleCased(_ text: String) -> String {
+        let words = text.lowercased().split(separator: " ", omittingEmptySubsequences: false)
+        return words.enumerated().map { index, word in
+            // The first word is always capitalised, however small it is.
+            guard index > 0, smallWords.contains(String(word)) else {
+                return word.prefix(1).uppercased() + word.dropFirst()
+            }
+            return String(word)
+        }.joined(separator: " ")
+    }
 }
 
 /// One user-visible change, applied across a selection.
@@ -13,6 +64,16 @@ public enum TagEdit: Sendable, Equatable {
     case set(TagKey, TagValue)
     case clear(TagKey)
     case replace(TagKey, find: String, with: String)
+    case transform(TagKey, TextTransform)
+    case copyField(from: TagKey, to: TagKey)
+    case swapFields(TagKey, TagKey)
+
+    /// What this edit would do, without doing it — so a sheet can show a
+    /// row-by-row preview built from the same code that performs the write.
+    /// A preview computed a second way is a preview that can lie.
+    public func previewed(on tags: TagSet) -> TagSet {
+        applied(to: tags)
+    }
 
     func applied(to tags: TagSet) -> TagSet {
         var result = tags
@@ -24,6 +85,19 @@ public enum TagEdit: Sendable, Equatable {
         case let .replace(key, find, replacement):
             guard let current = tags[key]?.stringValue, current.contains(find) else { return tags }
             result[key] = .string(current.replacingOccurrences(of: find, with: replacement))
+        case let .transform(key, transform):
+            // Only text transforms, and only on text: upper-casing a
+            // `.number` would stringify it and lose the type the writers
+            // key on for atoms like `trkn`.
+            guard case let .string(current)? = tags[key] else { return tags }
+            result[key] = .string(transform.applied(to: current))
+        case let .copyField(source, destination):
+            // An empty source clears the destination rather than doing
+            // nothing: "copy" means the two end up the same either way.
+            result[destination] = tags[source]
+        case let .swapFields(one, other):
+            result[one] = tags[other]
+            result[other] = tags[one]
         }
         return result
     }
@@ -69,6 +143,14 @@ public actor EditEngine {
         var tags: TagSet
         var artwork: [Artwork]
         var chapters: [Chapter]
+        var subtitleTracks: [SubtitleTrack]
+    }
+
+    private func snapshot(of item: MediaItem) -> Snapshot {
+        Snapshot(
+            kind: item.kind, tags: item.tags, artwork: item.artwork,
+            chapters: item.chapters, subtitleTracks: item.subtitleTracks
+        )
     }
 
     private let writer: any TagPersisting
@@ -85,7 +167,7 @@ public actor EditEngine {
     public func load(_ loaded: [MediaItem]) {
         items = Dictionary(uniqueKeysWithValues: loaded.map { ($0.url, $0) })
         order = loaded.map(\.url)
-        saved = items.mapValues { Snapshot(kind: $0.kind, tags: $0.tags, artwork: $0.artwork, chapters: $0.chapters) }
+        saved = items.mapValues { snapshot(of: $0) }
         undoStack.removeAll()
         redoStack.removeAll()
     }
@@ -97,18 +179,16 @@ public actor EditEngine {
         for item in loaded where items[item.url] == nil {
             items[item.url] = item
             order.append(item.url)
-            saved[item.url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            saved[item.url] = snapshot(of: item)
         }
     }
 
     /// Replace an item's on-disk state after a re-read, keeping its baseline in
     /// step so a freshly scanned file does not look dirty.
     public func refreshFromDisk(_ item: MediaItem) {
-        guard items[item.url] != nil, saved[item.url] == items[item.url].map({
-            Snapshot(kind: $0.kind, tags: $0.tags, artwork: $0.artwork, chapters: $0.chapters)
-        }) else { return }
+        guard items[item.url] != nil, saved[item.url] == items[item.url].map(snapshot(of:)) else { return }
         items[item.url] = item
-        saved[item.url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+        saved[item.url] = snapshot(of: item)
     }
 
     public var allItems: [MediaItem] {
@@ -124,6 +204,7 @@ public actor EditEngine {
         order.filter { url in
             guard let item = items[url], let snap = saved[url] else { return false }
             return item.tags != snap.tags || item.artwork != snap.artwork || item.chapters != snap.chapters
+                || item.subtitleTracks != snap.subtitleTracks
         }
     }
 
@@ -141,9 +222,9 @@ public actor EditEngine {
             guard var item = items[url] else { continue }
             let updated = edit.applied(to: item.tags)
             guard updated != item.tags else { continue }
-            batch.before[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.before[url] = snapshot(of: item)
             item.tags = updated
-            batch.after[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.after[url] = snapshot(of: item)
             items[url] = item
         }
         guard !batch.after.isEmpty else { return }
@@ -156,9 +237,9 @@ public actor EditEngine {
         var batch = Batch(before: [:], after: [:])
         for url in urls {
             guard var item = items[url], item.kind != kind else { continue }
-            batch.before[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.before[url] = snapshot(of: item)
             item.kind = kind
-            batch.after[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.after[url] = snapshot(of: item)
             items[url] = item
         }
         guard !batch.after.isEmpty else { return }
@@ -176,7 +257,7 @@ public actor EditEngine {
         var batch = Batch(before: [:], after: [:])
         for url in urls {
             guard var item = items[url] else { continue }
-            let beforeSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            let beforeSnap = snapshot(of: item)
             for key in clearing {
                 item.tags[key] = nil
             }
@@ -193,7 +274,7 @@ public actor EditEngine {
             if let chapters {
                 item.chapters = chapters
             }
-            let afterSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            let afterSnap = snapshot(of: item)
             guard beforeSnap != afterSnap else { continue }
             batch.before[url] = beforeSnap
             batch.after[url] = afterSnap
@@ -211,9 +292,9 @@ public actor EditEngine {
         var batch = Batch(before: [:], after: [:])
         for url in urls {
             guard var item = items[url], item.artwork != artwork else { continue }
-            batch.before[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.before[url] = snapshot(of: item)
             item.artwork = artwork
-            batch.after[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.after[url] = snapshot(of: item)
             items[url] = item
         }
         guard !batch.after.isEmpty else { return }
@@ -264,12 +345,26 @@ public actor EditEngine {
         for url in urls {
             guard var item = items[url] else { continue }
             guard item.chapters != sorted else { continue }
-            batch.before[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.before[url] = snapshot(of: item)
             item.chapters = sorted
-            batch.after[url] = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            batch.after[url] = snapshot(of: item)
             items[url] = item
         }
         guard !batch.after.isEmpty else { return }
+        undoStack.append(.edit(batch))
+        redoStack.removeAll()
+    }
+
+    /// Apply subtitle track edits (language, name, default/forced/enabled) as
+    /// one undoable batch — single-file only, same as chapters, since a
+    /// track's TrackUID identity belongs to one specific file.
+    public func applySubtitleTracks(_ subtitleTracks: [SubtitleTrack], to url: URL) {
+        guard var item = items[url], item.subtitleTracks != subtitleTracks else { return }
+        var batch = Batch(before: [:], after: [:])
+        batch.before[url] = snapshot(of: item)
+        item.subtitleTracks = subtitleTracks
+        batch.after[url] = snapshot(of: item)
+        items[url] = item
         undoStack.append(.edit(batch))
         redoStack.removeAll()
     }
@@ -281,7 +376,7 @@ public actor EditEngine {
         var batch = Batch(before: [:], after: [:])
         for (url, delta) in deltas {
             guard var item = items[url] else { continue }
-            let beforeSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            let beforeSnap = snapshot(of: item)
             for (key, value) in delta.values {
                 if let string = value.stringValue, string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     item.tags[key] = nil
@@ -289,7 +384,7 @@ public actor EditEngine {
                     item.tags[key] = value
                 }
             }
-            let afterSnap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            let afterSnap = snapshot(of: item)
             guard beforeSnap != afterSnap else { continue }
             batch.before[url] = beforeSnap
             batch.after[url] = afterSnap
@@ -411,6 +506,7 @@ public actor EditEngine {
             items[url]?.tags = snap.tags
             items[url]?.artwork = snap.artwork
             items[url]?.chapters = snap.chapters
+            items[url]?.subtitleTracks = snap.subtitleTracks
         }
     }
 
@@ -430,7 +526,7 @@ public actor EditEngine {
         var done = 0
         for url in pending {
             guard let item = items[url] else { continue }
-            let snap = Snapshot(kind: item.kind, tags: item.tags, artwork: item.artwork, chapters: item.chapters)
+            let snap = snapshot(of: item)
             do {
                 // Always hand over the chapters the item carries: an MPEG-4 tag
                 // write that skips them rebuilds the file without its chapter
@@ -439,6 +535,7 @@ public actor EditEngine {
                 try await writer.write(
                     item.tags, artwork: item.artwork,
                     chapters: item.chapters.isEmpty ? nil : item.chapters,
+                    subtitleTracks: item.subtitleTracks.isEmpty ? nil : item.subtitleTracks,
                     to: url
                 )
                 saved[url] = snap
@@ -460,7 +557,12 @@ public struct FileTagWriter: TagPersisting {
         self.backups = backups
     }
 
-    public func write(_ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, to url: URL) async throws {
-        try await MediaTagWriter(backups: backups).write(tags, artwork: artwork, chapters: chapters, to: url)
+    public func write(
+        _ tags: TagSet, artwork: [Artwork], chapters: [Chapter]?,
+        subtitleTracks: [SubtitleTrack]?, to url: URL
+    ) async throws {
+        try await MediaTagWriter(backups: backups).write(
+            tags, artwork: artwork, chapters: chapters, subtitleTracks: subtitleTracks, to: url
+        )
     }
 }
