@@ -31,6 +31,10 @@ struct MediaTagReaderTests {
         #expect(MediaTagReader.canWrite(.mp3))
         #expect(MediaTagReader.canWrite(.mkv))
         #expect(MediaTagReader.canWrite(.flac) == false)
+        #expect(MediaTagReader.canWriteChapters(.mkv))
+        #expect(MediaTagReader.canWriteChapters(.mp4))
+        #expect(MediaTagReader.canWriteChapters(.mp3) == false)
+        #expect(MediaTagReader.canWriteChapters(.epub) == false)
     }
 }
 
@@ -58,5 +62,20 @@ struct MediaTagWriterTests {
         try Data("fLaC".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         await #expect(throws: TagIOError.self) { try await MediaTagWriter().write(TagSet(), to: url) }
+    }
+
+    @Test("routes mkv chapters to MatroskaTagWriter — the inspector's edit path, not just tags")
+    func routesMkvChapters() async throws {
+        let url = try makeTestMKV(title: "Northwest Passage")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try await MediaTagWriter().write(
+            TagSet([.title: .string("Northwest Passage")]),
+            chapters: [Chapter(index: 0, start: 0, title: "Cold Open")],
+            to: url
+        )
+
+        let read = try await MediaTagReader().read(url)
+        #expect(read.chapters.map(\.title) == ["Cold Open"])
     }
 }
