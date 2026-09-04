@@ -334,6 +334,146 @@ struct MatroskaWriterTests {
         #expect(try Data(contentsOf: url) == original)
     }
 
+    // MARK: artwork
+
+    private func jpeg(_ byte: UInt8) -> Data {
+        Data([0xFF, 0xD8, 0xFF, byte, 0, 0, 0])
+    }
+
+    @Test("writes a cover into a file that had none")
+    func writesArtworkIntoFreshFile() async throws {
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let clustersBefore = try clusterPayload(of: url)
+
+        try await MatroskaTagWriter().write(
+            TagSet(), artwork: [Artwork(role: .cover, data: jpeg(1), mimeType: "image/jpeg")], to: url
+        )
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.artwork.map(\.data) == [jpeg(1)])
+        #expect(try clusterPayload(of: url) == clustersBefore, "video must be untouched")
+        #expect(try structure(of: url).segmentSizeIsCorrect)
+    }
+
+    @Test("a bigger cover replaces a smaller one, tags round-trip alongside it")
+    func replacesExistingArtwork() async throws {
+        let url = try makeLayoutMKV(
+            tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])]
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await MatroskaTagWriter().write(
+            TagSet([.title: .string("Short")]),
+            artwork: [Artwork(role: .cover, data: jpeg(1), mimeType: "image/jpeg")], to: url
+        )
+        let clustersBefore = try clusterPayload(of: url)
+
+        let bigger = Data([0xFF, 0xD8, 0xFF, 2]) + Data(repeating: 0x99, count: 4096)
+        try await MatroskaTagWriter().write(
+            TagSet([.title: .string("Northwest Passage")]),
+            artwork: [Artwork(role: .cover, data: bigger, mimeType: "image/jpeg")], to: url
+        )
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.artwork.map(\.data) == [bigger])
+        #expect(read.tags.title == "Northwest Passage", "tags survive an unrelated attachment rewrite")
+        #expect(try clusterPayload(of: url) == clustersBefore, "video must be untouched")
+        #expect(try structure(of: url).segmentSizeIsCorrect)
+    }
+
+    @Test("empty artwork leaves an existing cover attachment untouched")
+    func emptyArtworkIsANoOp() async throws {
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await MatroskaTagWriter().write(
+            TagSet(), artwork: [Artwork(role: .cover, data: jpeg(1), mimeType: "image/jpeg")], to: url
+        )
+
+        try await MatroskaTagWriter().write(TagSet([.title: .string("Northwest Passage")]), artwork: [], to: url)
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.artwork.map(\.data) == [jpeg(1)], "no artwork passed means don't touch what's there")
+        #expect(read.tags.title == "Northwest Passage")
+    }
+
+    // MARK: chapters
+
+    @Test("writes chapters into a file that had none")
+    func writesChaptersIntoFreshFile() async throws {
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let clustersBefore = try clusterPayload(of: url)
+
+        try await MatroskaTagWriter().write(TagSet(), chapters: [
+            Chapter(index: 0, start: 0, title: "Part One"),
+            Chapter(index: 1, start: 120, title: "Part Two")
+        ], to: url)
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.chapters.map(\.title) == ["Part One", "Part Two"])
+        #expect(read.chapters.map(\.start) == [0, 120])
+        #expect(try clusterPayload(of: url) == clustersBefore, "video must be untouched")
+        #expect(try structure(of: url).segmentSizeIsCorrect)
+    }
+
+    @Test("a new chapter list replaces the old one, tags round-trip alongside it")
+    func replacesExistingChapters() async throws {
+        let url = try makeLayoutMKV(
+            tags: [EBMLBuilder.tag(targetType: 50, [EBMLBuilder.simpleTag("TITLE", "Short")])]
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await MatroskaTagWriter().write(
+            TagSet([.title: .string("Short")]),
+            chapters: [Chapter(index: 0, start: 0, title: "Old Chapter")], to: url
+        )
+        let clustersBefore = try clusterPayload(of: url)
+
+        try await MatroskaTagWriter().write(
+            TagSet([.title: .string("Northwest Passage")]),
+            chapters: [
+                Chapter(index: 0, start: 0, title: "New One"),
+                Chapter(index: 1, start: 60, title: "New Two"),
+                Chapter(index: 2, start: 180, title: "New Three")
+            ], to: url
+        )
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.chapters.map(\.title) == ["New One", "New Two", "New Three"])
+        #expect(read.tags.title == "Northwest Passage", "tags survive an unrelated chapters rewrite")
+        #expect(try clusterPayload(of: url) == clustersBefore, "video must be untouched")
+        #expect(try structure(of: url).segmentSizeIsCorrect)
+    }
+
+    @Test("an explicit empty chapter list deletes every chapter")
+    func emptyChaptersDeletesAll() async throws {
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await MatroskaTagWriter().write(
+            TagSet(), chapters: [Chapter(index: 0, start: 0, title: "Only Chapter")], to: url
+        )
+
+        try await MatroskaTagWriter().write(TagSet([.title: .string("Northwest Passage")]), chapters: [], to: url)
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.chapters.isEmpty, "an explicit empty list means delete, not leave alone")
+        #expect(read.tags.title == "Northwest Passage")
+    }
+
+    @Test("no chapters argument leaves an existing chapter list untouched")
+    func nilChaptersIsANoOp() async throws {
+        let url = try makeLayoutMKV()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await MatroskaTagWriter().write(
+            TagSet(), chapters: [Chapter(index: 0, start: 0, title: "Keep Me")], to: url
+        )
+
+        try await MatroskaTagWriter().write(TagSet([.title: .string("Northwest Passage")]), to: url)
+
+        let read = try MatroskaReader().read(url)
+        #expect(read.chapters.map(\.title) == ["Keep Me"], "nil means don't touch chapters")
+        #expect(read.tags.title == "Northwest Passage")
+    }
+
     // MARK: helpers
 
     private func segmentStart(_ data: Data) -> Int {
@@ -416,5 +556,33 @@ struct RealMatroskaWriteTests {
             let drift = abs((after.duration ?? 0) - (before.duration ?? 0))
             #expect(drift < 0.001, "\(source.lastPathComponent): duration changed by \(drift)")
         }
+    }
+
+    @Test("edits a real subtitle track's language, name and flags without touching video or other tracks")
+    func writesRealSubtitleTrackMetadata() async throws {
+        let root = try #require(TwinPeaks.realMediaRoot)
+        let source = root.appending(path: "S01E01 - Northwest Passage.mkv")
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        let copy = URL.temporaryDirectory.appending(path: "copy-\(UUID().uuidString).mkv")
+        try FileManager.default.copyItem(at: source, to: copy)
+        defer { try? FileManager.default.removeItem(at: copy) }
+
+        let before = try MatroskaReader().read(copy)
+        let track = try #require(before.subtitleTracks.first, "expected the real episode file to carry an SRT track")
+
+        var edited = track
+        edited.language = "eng"
+        edited.name = "English"
+        edited.isDefault = true
+        try await MatroskaTagWriter().write(TagSet(), subtitleTracks: [edited], to: copy)
+
+        let after = try MatroskaReader().read(copy)
+        #expect(after.subtitleTracks.count == before.subtitleTracks.count, "no track was added or removed")
+        let readBack = try #require(after.subtitleTracks.first { $0.trackUID == track.trackUID })
+        #expect(readBack.language == "eng")
+        #expect(readBack.name == "English")
+        #expect(readBack.isDefault)
+        #expect(readBack.codecID == track.codecID, "the codec, which this writer never touches, must survive")
+        #expect(after.duration == before.duration, "video track must be untouched")
     }
 }
