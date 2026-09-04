@@ -32,10 +32,20 @@ public struct MediaTagReader: Sendable {
     }
 
     /// Narrower still: a PDF's "cover" is a rendering of page one, not stored
-    /// art, and an EPUB can only replace a cover it already has. mkv artwork
-    /// lives in an AttachedFile we do not write yet.
+    /// art, and an EPUB can only replace a cover it already has.
     public static func canWriteArtwork(_ container: ContainerFormat) -> Bool {
-        container.isMPEG4Family || container == .mp3 || container == .epub
+        container.isMPEG4Family || container == .mp3 || container == .epub || container == .mkv
+    }
+
+    /// mp3, epub and pdf have no chapter track/element at all.
+    public static func canWriteChapters(_ container: ContainerFormat) -> Bool {
+        container.isMPEG4Family || container == .mkv
+    }
+
+    /// mkv only — mp4's text tracks are a separate, rarer mechanism this
+    /// writer does not touch.
+    public static func canWriteSubtitleTracks(_ container: ContainerFormat) -> Bool {
+        container == .mkv
     }
 
     /// Writing is narrower than reading, and saying so is the honest UI.
@@ -54,7 +64,10 @@ public struct MediaTagWriter: Sendable {
         self.backups = backups
     }
 
-    public func write(_ tags: TagSet, artwork: [Artwork] = [], chapters: [Chapter]? = nil, to url: URL) async throws {
+    public func write(
+        _ tags: TagSet, artwork: [Artwork] = [], chapters: [Chapter]? = nil,
+        subtitleTracks: [SubtitleTrack]? = nil, to url: URL
+    ) async throws {
         guard let container = ContainerFormat(pathExtension: url.pathExtension) else {
             throw TagIOError.unsupportedContainer(url.pathExtension)
         }
@@ -62,7 +75,9 @@ public struct MediaTagWriter: Sendable {
         case .mp3:
             try await ID3TagWriter(backups: backups).write(tags, artwork: artwork, to: url)
         case .mkv:
-            try await MatroskaTagWriter(backups: backups).write(tags, to: url)
+            try await MatroskaTagWriter(backups: backups).write(
+                tags, artwork: artwork, chapters: chapters, subtitleTracks: subtitleTracks, to: url
+            )
         case .epub:
             try EPUBTagWriter(backups: backups).write(tags, artwork: artwork, to: url)
         case .pdf:
