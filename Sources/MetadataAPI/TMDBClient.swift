@@ -218,9 +218,13 @@ public struct TMDBClient: Sendable {
         /// `tmdbID` is the episode's own id, not the show's — every episode of a
         /// season would otherwise write the same id, and a later "refresh
         /// metadata" from the tag could never tell them apart.
+        ///
+        /// `title` is the episode's own name, with the show in `showName`.
+        /// A "Show — Episode" composite reads doubled in every player that
+        /// shows the series alongside the title (Plex, Infuse, Apple TV).
         func record(showID: String, showName: String) -> MetadataRecord {
             MetadataRecord(
-                id: showID, title: "\(showName) — \(name)", year: airDate.flatMap { Int($0.prefix(4)) },
+                id: showID, title: name, year: airDate.flatMap { Int($0.prefix(4)) },
                 summary: overview, director: crew?.first { $0.job == "Director" }?.name,
                 showName: showName, seasonNumber: seasonNumber, episodeNumber: episodeNumber,
                 episodeTitle: name, tmdbID: String(id), kind: .tvEpisode
