@@ -1,4 +1,5 @@
 import Foundation
+import MediaCore
 @testable import MetadataAPI
 import Testing
 
@@ -81,6 +82,55 @@ struct LiveOpenLibraryTests {
     }
 }
 
+/// iTunes needs no key at all, so this suite runs on `OMNITAG_LIVE=1` alone.
+@Suite("iTunes, live", .enabled(if: ProcessInfo.processInfo.environment["OMNITAG_LIVE"] == "1"))
+struct LiveITunesTests {
+    @Test("finds the real Badalamenti theme and answers with the fields we map")
+    func findsTheRealTrack() async throws {
+        let client = ITunesClient()
+        let results = try await client.searchSongs(.init(title: "Twin Peaks Theme Badalamenti"), limit: 10)
+        #expect(!results.isEmpty)
+
+        let match = try #require(results.first { $0.authors.contains("Angelo Badalamenti") })
+        let tags = await client.details(for: match).book.tagSet
+
+        #expect(tags[.artist]?.stringValue?.contains("Badalamenti") == true)
+        #expect(tags[.album]?.stringValue?.isEmpty == false)
+        #expect(tags[.trackNumber]?.intValue != nil)
+        #expect(tags[.author] == nil, "a track is by an artist, never an author")
+    }
+
+    /// The size segment is a CDN path convention, not a documented API — so
+    /// it is worth one live check that the upscaled URL actually resolves.
+    @Test("the upscaled artwork URL really serves an image")
+    func artworkURLResolves() async throws {
+        let client = ITunesClient()
+        let results = try await client.searchSongs(.init(title: "Twin Peaks Badalamenti"), limit: 10)
+        let url = try #require(results.compactMap(\.artworkURL).first)
+        #expect(url.absoluteString.contains("1200x1200bb"))
+
+        let (data, status) = try await URLSessionTransport().data(from: url)
+        #expect(status == 200)
+        #expect(data.count > 10000, "a 1200px cover is not a few hundred bytes")
+    }
+
+    /// The developer's own file is named "01 - Twin Peaks Theme.mp3", so this
+    /// is the whole path a real user walks: filename to query to a match.
+    @Test("the real file's own name finds the real track")
+    func realFilenameFindsTheTrack() async throws {
+        let query = MetadataQuery(from: TagSet(), filename: "01 - Twin Peaks Theme.mp3")
+        let results = try await ITunesClient().searchSongs(query, limit: 20)
+
+        #expect(results.contains { $0.title.localizedCaseInsensitiveContains("Twin Peaks") })
+    }
+
+    @Test("an unknown term is an empty result, not an error")
+    func unknownTermIsEmpty() async throws {
+        let results = try await ITunesClient().searchSongs(.init(title: "zzqqxxnotarealtrack12345"), limit: 5)
+        #expect(results.isEmpty)
+    }
+}
+
 /// Reads the key from `OMNITAG_TMDB_KEY`, never from Keychain — a live test
 /// must not depend on what happens to be saved in Preferences on this
 /// machine. `export OMNITAG_TMDB_KEY=...` before running; never committed.
@@ -116,5 +166,26 @@ struct LiveTMDBTests {
         #expect(episode.showName == match.title)
         #expect(episode.seasonNumber == 1)
         #expect(episode.episodeNumber == 1)
+    }
+
+    @Test("a scene-release filename searches TMDB successfully with no hand-editing")
+    func rawFilenameFindsTheShow() async throws {
+        // The whole point of the filename cleaning: what a user actually has
+        // on disk is what gets searched, untouched.
+        let query = MetadataQuery(
+            from: TagSet(), filename: "Twin.Peaks.S01E01.Northwest.Passage.1080p.BluRay.x265-GROUP.mkv"
+        )
+        let results = try await client.searchTV(query, limit: 5)
+        #expect(results.contains { $0.title == "Twin Peaks" && $0.year == 1990 })
+        #expect(query.season == 1)
+        #expect(query.episode == 1)
+    }
+
+    @Test("a movie's filename year picks the right one of two same-titled films")
+    func filenameYearPicksTheRightFilm() async throws {
+        let query = MetadataQuery(from: TagSet(), filename: "Dune.1984.1080p.BluRay.x264-GROUP.mkv")
+        let results = try await client.searchMovies(query, limit: 10)
+        // TMDB's own order puts Villeneuve's 2021 film first.
+        #expect(query.ranked(results).first?.year == 1984)
     }
 }
