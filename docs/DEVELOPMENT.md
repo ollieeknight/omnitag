@@ -39,7 +39,7 @@ once.)
 ## Command line
 
 ```sh
-make test      # swift test — the fast loop, 311 tests, ~1s
+make test      # swift test — the fast loop, 359 tests, ~1s
 make run       # swift run OmniTagApp
 make app       # assemble .build/OmniTag.app (ad-hoc signed)
 make install   # symlink that bundle into /Applications
@@ -120,7 +120,22 @@ without checking whether the CLI path works.
 
 ## Formatting
 
-`swiftformat` and `swiftlint` are installed on this machine but **not** wired
-into the build, and there is no config in the repo. Match the surrounding style
-by hand. If you want them enforced, add the config and a `make format` target in
-one commit — do not reformat the codebase as a side effect of another change.
+`swiftformat` and `swiftlint` **are** wired in: `.swiftformat` and
+`.swiftlint.yml` live at the repo root, `make lint` fails on a violation
+(and on any compiler warning, via `-warnings-as-errors`), and `make format`
+auto-fixes both. Run `make format` before `make lint` rather than hand-fixing
+style.
+
+Two things `make format` will do to code you just wrote, so write around them
+rather than fighting them afterwards:
+
+- It **strips `\` line continuations out of multi-line raw strings**. A regex
+  split across lines that way comes back joined *with the leading indentation
+  still in it* — silently changing what it matches. Build a long pattern from
+  an array of terms and `joined(separator:)` instead; see
+  `MetadataQuery.releaseNoise`.
+- It rewrites `try`/`await` placement (`hoistTry`, `hoistAwait`) and wraps
+  single-line `if` bodies.
+
+Do not reformat the codebase as a side effect of another change: `make format`
+touches only what is already non-conforming, which is the point.
