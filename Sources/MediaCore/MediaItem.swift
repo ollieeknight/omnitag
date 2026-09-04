@@ -31,6 +31,33 @@ public struct Artwork: Sendable, Hashable, Codable {
     }
 }
 
+public struct SubtitleTrack: Sendable, Hashable, Codable, Identifiable {
+    public var id: UInt64 {
+        trackUID
+    }
+
+    public var trackUID: UInt64
+    public var codecID: String
+    public var language: String?
+    public var name: String?
+    public var isDefault: Bool
+    public var isForced: Bool
+    public var isEnabled: Bool
+
+    public init(
+        trackUID: UInt64, codecID: String, language: String? = nil, name: String? = nil,
+        isDefault: Bool = false, isForced: Bool = false, isEnabled: Bool = true
+    ) {
+        self.trackUID = trackUID
+        self.codecID = codecID
+        self.language = language
+        self.name = name
+        self.isDefault = isDefault
+        self.isForced = isForced
+        self.isEnabled = isEnabled
+    }
+}
+
 public struct MediaItem: Sendable, Hashable, Codable, Identifiable {
     // ponytail: URL is the identity until a rename/move feature needs to track
     // files across paths — then swap in volume UUID + inode.
@@ -45,10 +72,12 @@ public struct MediaItem: Sendable, Hashable, Codable, Identifiable {
     public var tags: TagSet
     public var chapters: [Chapter]
     public var artwork: [Artwork]
+    public var subtitleTracks: [SubtitleTrack]
 
     public init(
         url: URL, kind: MediaKind, container: ContainerFormat, duration: TimeInterval? = nil,
-        tags: TagSet = TagSet(), chapters: [Chapter] = [], artwork: [Artwork] = []
+        tags: TagSet = TagSet(), chapters: [Chapter] = [], artwork: [Artwork] = [],
+        subtitleTracks: [SubtitleTrack] = []
     ) {
         self.url = url
         self.kind = kind
@@ -57,6 +86,7 @@ public struct MediaItem: Sendable, Hashable, Codable, Identifiable {
         self.tags = tags
         self.chapters = chapters
         self.artwork = artwork
+        self.subtitleTracks = subtitleTracks
     }
 }
 
