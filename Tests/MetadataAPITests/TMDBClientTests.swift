@@ -115,6 +115,20 @@ struct TMDBClientTests {
         #expect(record.tmdbID == "38713")
     }
 
+    @Test("an episode's title tag is the episode title, not a show-plus-episode composite")
+    func episodeTitleIsNotComposite() async throws {
+        let (client, transport) = client()
+        transport.responses["tv/1622/season/1/episode/1"] = Data(Self.episodeJSON.utf8)
+
+        let record = try await client.episodeDetails(showID: "1622", showName: "Twin Peaks", season: 1, episode: 1)
+        // Plex, Infuse and Apple TV all key on Title being the episode's own
+        // name, with the show in its own field. A "Show — Episode" composite
+        // shows up doubled in every player that also displays the show.
+        #expect(record.title == "Pilot")
+        #expect(record.tagSet[.title]?.stringValue == "Pilot")
+        #expect(record.tagSet[.showName]?.stringValue == "Twin Peaks")
+    }
+
     // MARK: errors
 
     @Test("no API key throws before any request is made")
