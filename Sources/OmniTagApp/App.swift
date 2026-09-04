@@ -13,7 +13,10 @@ struct OmniTagApp: App {
         WindowGroup {
             LibraryView(model: model)
         }
-        .windowStyle(.hiddenTitleBar)
+        // Not `.hiddenTitleBar`: the window had a title and a subtitle it
+        // never showed, so the toolbar's icons were the only thing naming
+        // where you were. Every Apple library app keeps its title.
+        .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .newItem) {
@@ -33,6 +36,9 @@ struct OmniTagApp: App {
                 Button("Search Metadata…") { model.showWizard = true }
                     .keyboardShortcut("l")
                     .disabled(model.selection.isEmpty || !model.kindHasProvider)
+                Button("Edit Tags…") { model.showBulkEdit = true }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(model.selection.isEmpty)
                 Button("Rename from Tags…") { model.showRenamer = true }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(model.selection.isEmpty)
@@ -64,7 +70,33 @@ struct OmniTagApp: App {
 
 @MainActor @Observable
 final class LibraryModel {
-    var kind: MediaKind = .music
+    /// What the sidebar points at. `All` is a view onto the library, not a
+    /// sixth kind — see `LibraryScope`.
+    var scope: LibraryScope = .all
+
+    /// The kind that editing UI speaks in: the inspector's field set, the
+    /// wizard's provider list, the rename presets.
+    ///
+    /// Derived, never stored. Under a kind scope it is that kind. Under
+    /// `All` a file still has exactly one kind, so the selection answers it —
+    /// and a selection whose kinds disagree falls back to `.music`, whose
+    /// field set (title/artist/album) is the one every kind shares.
+    var kind: MediaKind {
+        if let kind = scope.kind {
+            return kind
+        }
+        return selectedKind ?? .music
+    }
+
+    /// The kind the whole selection agrees on, or `nil` when it does not.
+    /// The inspector's Kind picker needs the distinction: showing one file's
+    /// kind for a mixed selection makes every other file look misfiled, and
+    /// choosing from it silently rewrites them all.
+    var selectedKind: MediaKind? {
+        let kinds = Set(selectedItems.map(\.kind))
+        return kinds.count == 1 ? kinds.first : nil
+    }
+
     /// Bumped whenever `items` is reassigned, so `visible`'s cache can check
     /// "did the library change" in O(1) instead of comparing the whole array
     /// (`MediaItem` is `Hashable` through `Artwork.data` — full equality on a
@@ -74,8 +106,16 @@ final class LibraryModel {
         didSet { itemsGeneration += 1 }
     }
 
+    /// What `ChapterBoundaryCheck` found for the selected file, empty until
+    /// the user asks. Advisory: nothing here blocks an edit.
+    var boundaryResults: [ChapterBoundaryCheck.Result] = []
+    var isCheckingBoundaries = false
+
     var selection: Set<URL> = [] {
         didSet {
+            // Verdicts describe one file's chapters; leaving them up after
+            // the selection moves would attribute them to the wrong ones.
+            boundaryResults = []
             if let first = selectedItems.first, first.container.isAVPlayerPlayable {
                 player.load(url: first.url)
             } else {
@@ -91,6 +131,7 @@ final class LibraryModel {
     var dirtyCount = 0
     var showWizard = false
     var showRenamer = false
+    var showBulkEdit = false
     var isDropTarget = false
     var showUnsavedOnly = false
     /// Which files differ from disk, so the table can mark them one by one
@@ -103,6 +144,24 @@ final class LibraryModel {
     let thumbnails = ThumbnailCache()
     private let engine = EditEngine(writer: FileTagWriter())
 
+    /// The folders this library was built from, so the next launch does not
+    /// start empty. See `LibraryRootStore` for why only roots are stored.
+    var roots = LibraryRootStore()
+
+    /// Re-scans every remembered folder that is still on disk. Called once,
+    /// when the window appears.
+    func restore() async {
+        let remembered = roots.existingRoots
+        guard !remembered.isEmpty else { return }
+        await scan(remembered)
+        // A restored library must not land on an empty tab: showing "No
+        // movies" over a library that plainly has files in it reads as the
+        // files having been lost rather than filed elsewhere.
+        if count(for: scope) == 0, let occupied = LibraryScope.allCases.first(where: { count(for: $0) > 0 }) {
+            scope = occupied
+        }
+    }
+
     /// Every input `visible` filters/sorts by, cheap to compare: `items`
     /// itself is represented by `itemsGeneration` rather than the array's
     /// value (`MediaItem` equality walks artwork bytes — too costly to use
@@ -114,7 +173,7 @@ final class LibraryModel {
         // periphery:ignore
         var itemsGeneration: Int
         // periphery:ignore
-        var kind: MediaKind
+        var scope: LibraryScope
         // periphery:ignore
         var search: String
         // periphery:ignore
@@ -133,14 +192,14 @@ final class LibraryModel {
     /// and re-sort the whole library on every unrelated redraw too.
     var visible: [MediaItem] {
         let key = VisibleCacheKey(
-            itemsGeneration: itemsGeneration, kind: kind, search: search,
+            itemsGeneration: itemsGeneration, scope: scope, search: search,
             showUnsavedOnly: showUnsavedOnly, dirtyURLs: dirtyURLs, sortOrder: sortOrder
         )
         if let visibleCache, visibleCache.key == key {
             return visibleCache.result
         }
 
-        let result = items.filter { $0.kind == kind }
+        let result = items.filter { scope.kind == nil || $0.kind == scope.kind }
             .filter { showUnsavedOnly ? dirtyURLs.contains($0.url) : true }
             .filter { search.isEmpty || $0.searchText.localizedCaseInsensitiveContains(search) }
             .sorted(using: sortOrder)
@@ -151,16 +210,17 @@ final class LibraryModel {
     /// How many library items are filed under each kind — shown as a sidebar
     /// badge so adding a mixed folder while on one tab doesn't look like
     /// files vanished; they are just filed under a different tab.
-    func count(for kind: MediaKind) -> Int {
-        items.count { $0.kind == kind }
+    func count(for scope: LibraryScope) -> Int {
+        guard let kind = scope.kind else { return items.count }
+        return items.count { $0.kind == kind }
     }
 
     var selectedItems: [MediaItem] {
         visible.filter { selection.contains($0.url) }
     }
 
-    /// Whether any provider serves the current tab. Movies and TV have none
-    /// yet, and the wizard says so rather than opening onto nothing.
+    /// Whether any provider serves the current tab. Music has none yet, and
+    /// the wizard button is disabled there rather than opening onto nothing.
     var kindHasProvider: Bool {
         !MetadataProviders.serving(kind).isEmpty
     }
@@ -196,6 +256,13 @@ final class LibraryModel {
     }
 
     func load(urls: [URL]) async {
+        roots.remember(urls)
+        await scan(urls)
+    }
+
+    /// The scan itself, without remembering — what `restore()` re-runs on
+    /// launch for folders that are already remembered.
+    private func scan(_ urls: [URL]) async {
         status = "Scanning \(urls.count) item\(urls.count == 1 ? "" : "s")…"
         do {
             let scanner = LibraryScanner()
@@ -206,10 +273,13 @@ final class LibraryModel {
                 if exists, isDirectory.boolValue {
                     try await scanned.append(contentsOf: scanner.scan(url))
                 } else if let container = ContainerFormat(pathExtension: url.pathExtension) {
-                    scanned.append(MediaItem(url: url, kind: Self.detectKind(url: url, defaultKind: kind), container: container))
+                    scanned.append(MediaItem(url: url, kind: .music, container: container))
                 }
             }
-            // Smart auto-classifier: assign kind based on format and naming heuristics.
+            // Smart auto-classifier: assign kind based on format and naming
+            // heuristics. The scanner types by extension only, so this is the
+            // one place a kind is decided — for scanned folders and for files
+            // dropped straight onto the table alike.
             for index in scanned.indices {
                 scanned[index].kind = Self.detectKind(url: scanned[index].url, defaultKind: kind)
             }
@@ -281,6 +351,13 @@ final class LibraryModel {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
         await engine.setKind(newKind, to: urls)
+        // Follow the files to their new tab. Without this the reclassified
+        // files drop out of `visible`, which `selectedItems` filters through,
+        // so the selection resolved empty and the inspector went blank.
+        // Under All they never left, so the scope stays put.
+        if scope.kind != nil {
+            scope = .kind(newKind)
+        }
         await refresh()
     }
 
@@ -291,11 +368,23 @@ final class LibraryModel {
         await refresh()
     }
 
-    func applyWizardSnapshot(tags: TagSet, artwork: [Artwork], chapters: [Chapter]?, clearing: Set<TagKey> = []) async {
+    func applyWizardSnapshot(
+        tags: TagSet, artwork: [Artwork], chapters: [Chapter]?,
+        clearing: Set<TagKey> = [], reclassifyTo kind: MediaKind? = nil
+    ) async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
         let sized = artwork.compactMap { CoverImage.artwork(from: $0.data, role: $0.role, maxPixels: CoverImage.defaultMaxPixels) }
         await engine.applySnapshot(tags: tags, artwork: sized, chapters: chapters, clearing: clearing, to: urls)
+        // The wizard's kind is authoritative: writing TV-shaped fields while
+        // the library still files the file as a movie is the disagreement
+        // this closes. Same batch, so one ⌘Z undoes both.
+        if let kind {
+            await engine.setKind(kind, to: urls)
+            if scope.kind != nil {
+                scope = .kind(kind)
+            }
+        }
         await refresh()
     }
 
@@ -390,6 +479,20 @@ final class LibraryModel {
         await applyChapters(chapters)
     }
 
+    // MARK: - Subtitle Track Editing
+
+    /// Single-file, same reasoning as chapters: a track's identity (TrackUID)
+    /// belongs to one specific file. No add/remove — muxing a new track in or
+    /// out means rewriting every Cluster, out of scope for metadata editing.
+    func updateSubtitleTrack(_ track: SubtitleTrack) async {
+        guard let item = selectedItems.first else { return }
+        var tracks = item.subtitleTracks
+        guard let index = tracks.firstIndex(where: { $0.trackUID == track.trackUID }) else { return }
+        tracks[index] = track
+        await engine.applySubtitleTracks(tracks, to: item.url)
+        await refresh()
+    }
+
     func addChapter(at time: TimeInterval, title: String? = nil) async {
         guard let item = selectedItems.first else { return }
         var chapters = item.chapters
@@ -457,13 +560,20 @@ final class LibraryModel {
 
     /// Drops files from the library. The files themselves are never touched —
     /// this is a view of a folder, not a manager of it.
+    ///
+    /// Removing the *last* file also forgets the folders it came from:
+    /// otherwise the next launch re-scans them and everything just removed
+    /// comes straight back, which reads as the removal having failed.
     func removeSelected() async {
         let urls = Array(selection)
         guard !urls.isEmpty else { return }
         await engine.remove(urls)
         selection = []
         await refresh()
-        status = "\(items.count) files"
+        if items.isEmpty {
+            roots.forgetAll()
+        }
+        status = items.isEmpty ? "Library empty" : "\(items.count) files"
     }
 
     func revealSelected() {
@@ -536,8 +646,42 @@ extension MediaItem {
         tags.author ?? tags.artist ?? ""
     }
 
+    /// Whoever the file is *by*, whatever kind it is — the one column that
+    /// makes a mixed All table readable. A film's director, a show's name, a
+    /// book's author, a track's artist: each kind's answer to the same
+    /// question, which per-kind tabs get to ask in their own words.
+    /// "Episode", not "TV Shows" — a row names one file, not a collection.
+    var kindLabel: String {
+        LibraryScope.kind(kind).rowLabel
+    }
+
+    var displayBy: String {
+        switch kind {
+        case .movie: tags[.director]?.stringValue ?? tags.author ?? ""
+        case .tvEpisode: tags.showName ?? tags[.director]?.stringValue ?? ""
+        default: tags.author ?? tags.artist ?? ""
+        }
+    }
+
     var displayNarrator: String {
         tags[.narrator]?.stringValue ?? ""
+    }
+
+    var displayDirector: String {
+        tags[.director]?.stringValue ?? ""
+    }
+
+    var displayYear: String {
+        tags[.year]?.stringValue ?? ""
+    }
+
+    /// "S01E01" for the TV table's own column. Empty when either half is
+    /// missing — half an episode number is worse than none.
+    var displayEpisode: String {
+        guard let season = tags[.seasonNumber]?.stringValue,
+              let episode = tags[.episodeNumber]?.stringValue,
+              let season = Int(season), let episode = Int(episode) else { return "" }
+        return String(format: "S%02dE%02d", season, episode)
     }
 
     var displaySeries: String {
