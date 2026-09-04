@@ -435,6 +435,124 @@ model-layer change (items 1, 3, 4) test-first against that settled
 interaction; resolve item 5 as part of the same design pass, not as an
 afterthought during implementation.
 
+## Seventh pass: mkv artwork writing closes the gap from the first pass
+
+The gap flagged at the top of this doc — "mkv cannot store artwork" — is
+fixed: `MatroskaTagWriter.write` takes an `artwork: [Artwork]` parameter and
+writes one `AttachedFile` per cover into `Attachments`, patched in place by
+the same three-case layout logic (`Tags` and `Attachments` are independent
+top-level elements, each with its own `Void` slack and `SeekHead` entry — a
+tag-only write never touches an existing cover). See `FORMATS.md` for the
+byte-level detail. `MediaTagReader.canWriteArtwork` now includes `.mkv`, so
+`MetadataWizardModel.canWriteArtwork` and the summary step's "artwork will be
+skipped" warning both fall away for mkv on their own — no wizard code
+changed. TDD: `MatroskaWriterTests` gained three cases (fresh file, replacing
+an existing cover alongside unrelated tags, and empty artwork being a no-op
+rather than clearing the existing cover); `MetadataWizardModelTests
+.mkvNeverGetsArtwork` — asserting the old gap — flipped to
+`mkvGetsArtwork`, asserting the fix. `make test` green throughout
+(311 → 314 tests). Not committed.
+
+## Eighth pass: mkv chapter writing, and no chapter-fetch API exists for movies/TV
+
+Before building this, checked whether a free/community API for movie/TV
+chapter data (scene markers, act breaks) exists the way TMDB serves metadata
+and Audnexus serves audiobook chapters. It does not, and structurally can't:
+chapter markers are a DVD/Blu-ray authoring artifact, not published or
+catalogued editorial content anywhere — Plex/Jellyfin only ever read what a
+rip already embeds (from `MakeMKV` et al.) or generate their own local scene
+markers, never fetch them. So mkv chapter support here is purely local
+editing of chapters already in the file, via the inspector — never a wizard
+step, since there is nothing for a provider to search for.
+
+`MatroskaTagWriter.write` gained `chapters: [Chapter]? = nil`, writing a
+single default `EditionEntry` (OmniTag's `Chapter` model has no concept of
+multiple editions, matching what `MatroskaReader` already flattens every
+edition into on read) via the same generalized element-patch machinery
+`Tags` and `Attachments` use. `nil` leaves existing chapters alone; an
+explicit `[]` deletes all of them — mirroring the contract `MediaTagReader
+.write` already used for mp4's `MPEG4ChapterWriter` branch. `MediaTagReader
+.canWriteChapters` is new (mp4-family + mkv; not mp3/epub/pdf), wired into
+the inspector's chapter section so a format whose chapters are read-only
+shows the list without edit controls instead of silently discarding edits
+on save.
+
+Generalizing `MatroskaTagWriter`'s single-element patch logic to a third
+element surfaced a real bug affecting all three: an element's "am I last in
+the file?" check compared against the *original* file length, not the
+current projected end-of-file. Writing two elements that both need to
+relocate in the same call (e.g. a bigger `Tags` and a bigger `Chapters`
+together) could silently corrupt the file, because the second element's
+stale "last" check would overwrite it in place at an offset that was no
+longer actually the end of the file. Fixed by comparing against
+`plan.newLength ?? plan.fileLength`; caught by a test that grows both `Tags`
+and `Chapters` past their original regions in one write. See `FORMATS.md`
+for the byte-level detail.
+
+TDD throughout; `make test` green (314 → 319 tests). Not committed.
+
+## Ninth pass: mkv subtitle track metadata
+
+The next item after mkv chapters: subtitle track editing. Scoped down hard
+during brainstorming before any code — an mkv subtitle track is carried as
+`SimpleBlock`s inside Clusters, the one region `MatroskaTagWriter`'s whole
+design deliberately never touches (that's how it patches a 6 GB file in
+milliseconds); adding or removing a track means rewriting every Cluster's
+block structure, a real remux. So this pass edits **metadata on tracks
+already in the file** — language, track name, default/forced/enabled flags —
+never mux, never touch cue payloads, never ASS/SSA style headers (those live
+inside the track's own data, not its metadata).
+
+New `SubtitleTrack` (`MediaCore`), identified by its `TrackUID` — the file's
+own permanent identity, not file-order position, since edits must survive a
+different read order and any future add/remove work. `MatroskaReader` gained
+`walkTracks`, filtering `TrackType == 17` (subtitle) out of the previously
+entirely-skipped `Tracks` element; `LanguageBCP47` wins over the legacy
+`Language` field when both are present, and an empty `Name` reads as `nil`,
+not `""`.
+
+The writer is the one place this breaks from Tags/Attachments/Chapters'
+pattern: those three are fully regenerated from OmniTag's own model on every
+write, but `Tracks` also holds video/audio TrackEntries and per-track binary
+blobs (`CodecPrivate`) that must round-trip byte-for-byte per `AGENTS.md`'s
+lossless invariant. `MatroskaTagWriter.patchTracks` walks the *existing*
+`Tracks` body instead: an untouched TrackEntry (video, audio, an unedited
+subtitle track) is byte-copied whole; inside a matched entry, only the six
+known fields are replaced, every other child — including `CodecPrivate` —
+survives untouched. An edit whose `TrackUID` matches nothing in the file is
+silently dropped, never inserted as a phantom track. `Tracks` then plans
+through the same generalized `planElement`/`Layout.slot(for:)` machinery as
+Tags/Attachments/Chapters — a fourth independent top-level element.
+
+Full loop shipped in one pass: reader, writer, `MediaTagReader
+.canWriteSubtitleTracks` (mkv only), `EditEngine.applySubtitleTracks`
+(single-file, undoable, wired into `save()`/`Snapshot`/`dirtyURLs` exactly
+like chapters), and an inspector section (`SubtitleTrackRow`: language/name
+fields, three checkboxes, no add/remove UI since none is supported).
+
+Tested against the developer's own real files, not just synthetic fixtures:
+the S01E01 episode (one untagged SRT track) and the film (one tagged SRT
+plus three PGS/bitmap tracks from the Blu-ray, no text or style data at all —
+reinforcing that track-metadata-only was the right scope, since font/style
+editing wouldn't even apply to most subtitle tracks in a real library).
+`make test` green throughout (319 → 333 tests). Not committed.
+
+### Considered and ruled out before writing code
+
+- **Full track mux (add/remove)** — real remux territory (see above); a
+  stream-copy remux is I/O-bound and cheap in principle (no re-encoding), but
+  real engineering (Cluster block rewriting or shelling out to a muxer), and
+  a separate project from metadata editing. Not started.
+- **ASS/SSA style header editing** (`[V4+ Styles]` font/size/color) — lives
+  inside the track's own cue data, not its `TrackEntry` metadata; editing it
+  means parsing and rewriting blocks inside Clusters, the exact remux risk
+  ruled out above. The real film's PGS tracks have no such header at all
+  (bitmap subtitles), underlining that this would only ever help a minority
+  of real tracks.
+- **Sidecar subtitle files** (`.srt`/`.ass` next to the video) — the user
+  specified mkv-embedded tracks only; sidecar files are a different, simpler
+  problem (no container parsing at all) not asked for this pass.
+
 ## Follow-up: a season batch fetcher
 
 Not built. Today the wizard picks one show → one episode and applies it to
@@ -447,3 +565,221 @@ against its matched episode rather than broadcasting one result to the
 whole selection. This changes `MetadataWizardModel`'s core "one result for
 the whole selection" assumption, so it is scoped as its own follow-up
 rather than folded into the single-episode picker above.
+
+## Tenth pass: a bug hunt and a streamlining pass over the movie/TV path
+
+A read-the-docs-then-hunt pass over the whole movie/TV journey, from adding a
+folder to writing tags on the developer's real 6.5 GB film. Nine bugs and
+seven streamlining changes, all TDD, `make test` green throughout (333 → 357
+tests). Verified against the live TMDB API and both real mkv files.
+
+### Bugs fixed
+
+- **A TV episode's `Title` tag was written as `"Show — Episode"`.**
+  `EpisodeDetail.record` built a composite title, which `MetadataRecord
+  .tagSet` then wrote straight into `TagKey.title`. Every player that shows
+  the series alongside the title (Plex, Infuse, Apple TV) reads that
+  doubled. `title` is now the episode's own name; the show already had its
+  own field in `showName`. See `TMDBClientTests.episodeTitleIsNotComposite`.
+
+- **`standardFields(for: .tvEpisode)` listed neither `.title` nor
+  `.synopsis`**, although TMDB returns an overview for every episode and
+  `tagSet` writes it. The field appeared in the wizard's diff only because
+  `TagDiff` unions the proposed keys — unlabelled and sorted into the
+  alphabet. Both added.
+
+- **Selecting a show while a non-default season was showing fired two
+  fetches for one list.** `selectedSeason`'s `didSet` started a `Task` and
+  `select(candidate:)` then called `loadSeasonEpisodes()` explicitly, so
+  setting the season back to 1 raced two requests to set
+  `episodeLoadState`. The `didSet` is gone; the episode step's
+  `.task(id: selectedSeason)` is now the single trigger, and
+  `loadSeasonEpisodes` early-returns when the list on screen is already the
+  one being asked for (so stepping Back into the picker costs nothing).
+
+- **Picking a second show showed the first show's episodes** until the new
+  fetch landed — `episodeLoadState` was never reset between candidates.
+  Now cleared to `.idle` alongside the season. See
+  `EpisodePickerStateTests`.
+
+- **`detectKind` ran twice for every file added individually** — once
+  inline in `load(urls:)`'s single-file branch, then again in the loop that
+  classifies everything. The inline call is gone; the loop is the one place
+  a kind is decided.
+
+- **The wizard's tag table rendered `.tmdbID` as "Tmdb Id"**, deriving every
+  label from the enum case name by camel-case splitting while
+  `standardFields` already carried a hand-written "TMDB ID". `TagKey.label
+  (for:)` is new in `MediaCore` and reads `standardFields`; the wizard's
+  private version now calls it.
+
+- **The inspector kept its own copy of the per-kind field table** and had
+  already drifted from `standardFields` (no `.tmdbID` anywhere, no `.title`
+  for TV). Deleted; `InspectorView.fields` is now
+  `TagKey.standardFields(for: model.kind)`.
+
+- **A formatter regression, caught by its own test.** The release-noise
+  regex was first written as a multi-line raw string with `\` line
+  continuations; `swiftformat` strips those, which silently injected
+  literal spaces into the middle of the alternation and left every term
+  but the first two matchable only with padding. Rebuilt as a joined
+  array of terms, and `allReleaseTermsStrip` now asserts each term
+  individually.
+
+- **Stale comment** on `LibraryModel.kindHasProvider` still said movies and
+  TV had no provider.
+
+### Streamlining
+
+- **A scene-release filename now searches successfully as it stands.**
+  `cleanedFilename` only ever stripped audiobook noise, so
+  `Twin.Peaks.S01E01.Northwest.Passage.1080p.BluRay.x265-GROUP.mkv` reached
+  TMDB verbatim and matched nothing. It now cuts everything from the
+  `SxxEyy`/`NxM` marker onwards (that is the episode title and the release
+  group, and TMDB's TV search wants the show), strips resolution/source/
+  codec/audio/edition terms, and drops a trailing release year.
+
+- **The filename's own season and episode are used, not thrown away.**
+  `MetadataQuery` gained `season`, `episode` and `year`, scraped by
+  `videoParts`. The episode picker opens on the season the file names
+  rather than always season 1, and marks the matching episode with a
+  "From filename" chip — a 22-episode season no longer has to be read to
+  find the one row that was already known.
+
+- **A movie's filename year now breaks TMDB's popularity ties.**
+  `MetadataQuery.ranked` promotes candidates whose year matches (exactly,
+  then within one, for films that straddle a new year) and is the identity
+  when the filename carries no year, so a provider that ranks well is not
+  second-guessed. Verified live: `/search/movie?query=Dune` returns 2021
+  first, and `Dune.1984.…mkv` now surfaces Lynch's. This closes the
+  "search ranking quality" item the ninth pass flagged as unverifiable
+  without a key.
+
+- **The tag diff reads in a sensible order.** `TagDiff` sorted every row
+  alphabetically, so a TV episode read Director, Episode Number, Episode
+  Title, Genre, Season Number, Show Name… It now follows `standardFields`'
+  curated order and appends anything extra after it.
+
+- **The movies and TV tabs get their own columns.** The table offered
+  Author, Narrator, ISBN and ASIN on every tab — all four permanently
+  empty for video — and no Director, Year or episode number. Added
+  `Director`, `Year` and an `SxxEyy` `Episode` column, defaulted visible
+  on the video tabs, with `Author` defaulted hidden there.
+
+- **A missing TMDB key is said before the search, not after.**
+  `MetadataProvider.isMissingAPIKey` (default `false`, overridden by
+  `TMDBProvider`) lets the wizard show a "needs a key" state with a
+  `SettingsLink` to Preferences on arrival, instead of only after a query
+  the user typed was certain to fail. The error state's button changes
+  from "Try Again" (which retries the same doomed search) to "Open
+  Preferences…" for the same reason. The idle state's wording and icon
+  also stop mentioning Audible links on a film tab.
+
+### Coverage added
+
+- `MatroskaTests` gained two real-media journey tests: a full movie tag set
+  and a full episode tag set written to a copy of the developer's actual
+  film and episode and read back, every `standardFields` key asserted, with
+  the duration checked afterwards to prove the in-place patch stayed
+  outside the Clusters. Both run under `OMNITAG_REAL_MEDIA` and pass.
+- `LiveAPITests` gained two TMDB checks that exercise the new filename
+  path end to end: a raw scene-release name finding the right show, and a
+  filename year picking the right one of two same-titled films.
+- `RenamePresetTests` renders and re-parses every rename preset of every
+  kind — the movie and TV presets had no test at all before.
+
+### Files split, no behaviour change
+
+`InspectorView` moved out of `LibraryView.swift`, and the chapters and
+summary steps out of `MetadataWizardView.swift` into
+`MetadataWizardSteps.swift`, both because the additions above pushed the
+originals past SwiftLint's type-body limit.
+
+### Still open
+
+- **Finalist B** (the wizard's movie-vs-TV choice writing back to a file's
+  kind) is unchanged and still unbuilt — see the sixth pass above.
+- **The season batch fetcher** below is likewise untouched.
+
+## Eleventh pass: a docs audit, and the library remembers itself
+
+A read-every-doc pass looking for what was left, wrong, or quietly broken.
+Three docs made claims that were no longer true, one modelled tag key had no
+way to be named in a rename pattern, and the biggest open item in `STATUS.md`
+turned out to be small enough to just do.
+
+### A real bug the docs led to
+
+**`%tmdbid%` and `%synopsis%` silently meant the wrong tag.**
+`FilenamePattern.vocabulary` had no entry for `.tmdbID` or `.synopsis`,
+and `key(named:)` falls back to `TagKey.custom(name.uppercased())` for
+anything it does not know. So `%tmdbid%` resolved to
+`TagKey.custom("TMDBID")` — a *different* key from `.tmdbID` — and a
+rename pattern using it rendered nothing for a file that plainly had a
+TMDB ID, refusing the row as "No tmdbid". Parsing had the mirror problem:
+it wrote to a custom tag nothing else reads. Both names added.
+
+`FilenamePatternTests.everyStandardFieldIsNameable` now asserts that every
+key in `TagKey.standardFields` has a placeholder name, for every kind, so
+a future key cannot repeat this quietly. `[tmdbid-2667]` is the bracket
+form Plex and Jellyfin read out of a filename, so this also makes OmniTag
+able to name a library the way they expect.
+
+### Docs that were wrong
+
+- **`DEVELOPMENT.md` contradicted itself.** Its "Formatting" section said
+  swiftformat and swiftlint were "**not** wired into the build, and there is
+  no config in the repo" — while its own "Command line" section eight lines
+  above documents `make lint` and `make format`, and both configs sit at the
+  repo root. Rewritten, and it now also warns about the two things
+  `make format` does to freshly-written code: it strips `\` line
+  continuations out of multi-line raw strings (which silently changed a
+  regex during the tenth pass — see that pass's formatter-regression note)
+  and it moves `try`/`await`.
+- **`ROADMAP.md` said mkv subtitle track metadata was "mp4 only"**, in a
+  section titled "mkv subtitle track metadata", describing a feature
+  `MediaTagReader.canWriteSubtitleTracks` gates to mkv alone. Inverted
+  typo, fixed.
+- **`STATUS.md` never mentioned `.avi`.** It listed flac and ogg/opus as
+  "scanned and listed, not parsed at all" but omitted avi, which has
+  exactly the same status and is the only one of the four that lands on a
+  *video* tab — so it is the one a movie library actually meets. The
+  inspector already handles it honestly (its "no writer yet" warning);
+  only the doc was silent.
+
+### Library persistence, built
+
+`STATUS.md`'s largest "does not work yet" entry, and the item
+`AUDIOBOOKS.md` named as next alongside mkv chapters (which shipped in the
+eighth pass). It is small because the app is **not sandboxed**: plain file
+URLs in `UserDefaults` reopen fine, so none of the security-scoped bookmark
+machinery `DISTRIBUTION.md` describes is needed until the App Store is.
+
+`LibraryRootStore` stores only the **roots**, never the scanned library. A
+serialised item list would be a cache that is wrong more often than it is
+useful — files move, get retagged by other tools, and get deleted while the
+app is closed — whereas a rescan is fast and correct by construction. Three
+behaviours are less obvious than the storage:
+
+- A remembered folder that has since been **deleted or moved is dropped**
+  (`existingRoots`), not re-scanned into an error on every launch forever.
+- **Removing the last file forgets the roots.** Otherwise the next launch
+  re-scans them and everything just removed comes straight back, which
+  reads as the removal having failed.
+- **A restored library lands on a tab that has files in it.** The app opens
+  on Music; restoring a library of films into it showed "No music match"
+  over a library that plainly had films in it — the fifth pass's "why has
+  my file disappeared?" friction, back again at launch. Caught by
+  screenshotting the actual running app after the persistence work, not by
+  a test that was looking for it.
+
+The store holds its defaults **suite name** rather than a `UserDefaults`
+object, because `UserDefaults` is not `Sendable` and the model hands the
+store across actors; resolving the suite per call is free. Strict
+concurrency caught that, and the fix is the honest one rather than
+`@unchecked Sendable`.
+
+TDD throughout; `make test` green (357 → 367 tests). Verified in the real
+app as well as in tests: seeded a root into the real defaults domain,
+relaunched the built bundle, and confirmed by screenshot that the library
+came back, landed on Movies, and showed the video columns. Not committed.
