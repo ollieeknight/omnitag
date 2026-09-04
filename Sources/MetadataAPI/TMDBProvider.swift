@@ -40,6 +40,10 @@ public struct TMDBProvider: MetadataProvider {
         true
     }
 
+    public var isMissingAPIKey: Bool {
+        keyStore.key()?.isEmpty != false
+    }
+
     private var client: TMDBClient {
         TMDBClient(apiKey: keyStore.key(), transport: transport)
     }
