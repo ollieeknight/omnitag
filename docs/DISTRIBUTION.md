@@ -43,7 +43,9 @@ when someone without Xcode needs to install it.
 ## Sandboxing
 
 Not sandboxed. A tag editor needs arbitrary user-chosen folders, and a
-non–App Store build has no reason to pay the entitlement cost. If OmniTag ever
-targets the App Store, security-scoped bookmarks become mandatory for
-remembering library folders across launches — currently it does not remember
-them at all.
+non–App Store build has no reason to pay the entitlement cost. OmniTag does remember library folders across
+launches, as plain file URLs in `UserDefaults` (`LibraryRootStore`), which
+works precisely because it is not sandboxed. If OmniTag ever targets the App
+Store, those become security-scoped bookmarks — a real change, since a
+bookmark has to be resolved and its access scope started and stopped around
+every read.
