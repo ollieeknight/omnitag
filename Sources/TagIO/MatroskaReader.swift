@@ -36,6 +36,18 @@ public struct MatroskaReader: Sendable {
         static let attachedFile: UInt64 = 0x61A7
         static let fileMimeType: UInt64 = 0x4660
         static let fileData: UInt64 = 0x465C
+        static let tracks: UInt64 = 0x1654_AE6B
+        static let trackEntry: UInt64 = 0xAE
+        static let trackUID: UInt64 = 0x73C5
+        static let trackType: UInt64 = 0x83
+        static let subtitleTrackType: UInt64 = 17
+        static let codecID: UInt64 = 0x86
+        static let language: UInt64 = 0x22B59C
+        static let languageBCP47: UInt64 = 0x22B59D
+        static let trackName: UInt64 = 0x536E
+        static let flagDefault: UInt64 = 0x88
+        static let flagForced: UInt64 = 0x55AA
+        static let flagEnabled: UInt64 = 0xB9
     }
 
     public func read(_ url: URL) throws -> MediaItem {
@@ -83,7 +95,8 @@ public struct MatroskaReader: Sendable {
                     }
                     return renumbered
                 },
-            artwork: state.artwork
+            artwork: state.artwork,
+            subtitleTracks: state.subtitleTracks
         )
     }
 
@@ -91,6 +104,7 @@ public struct MatroskaReader: Sendable {
         var tags = TagSet()
         var chapters: [Chapter] = []
         var artwork: [Artwork] = []
+        var subtitleTracks: [SubtitleTrack] = []
         var duration: TimeInterval?
         var segmentTitle: String?
         var timestampScale: Double = 1_000_000 // nanoseconds per tick, Matroska's default
@@ -118,6 +132,8 @@ public struct MatroskaReader: Sendable {
                 try walkTags(&reader, until: bodyEnd, into: &state)
             case ID.attachments, ID.attachedFile:
                 try walkAttachments(&reader, until: bodyEnd, into: &state)
+            case ID.tracks:
+                walkTracks(&reader, until: bodyEnd, into: &state)
             default:
                 reader.seek(to: bodyEnd) // Clusters, Tracks, Cues, SeekHead: skipped whole
             }
@@ -313,5 +329,60 @@ public struct MatroskaReader: Sendable {
             }
             reader.seek(to: bodyEnd)
         }
+    }
+
+    /// Only subtitle-type TrackEntries are surfaced. Video/audio tracks carry
+    /// no field OmniTag edits, and `Tracks` is otherwise never read at all.
+    private func walkTracks(_ reader: inout EBMLReader, until end: Int, into state: inout ParseState) {
+        while reader.offset < end {
+            guard let elementID = try? reader.readElementID(),
+                  let size = try? reader.readSize().map({ Int($0) })
+            else { return }
+            let bodyEnd = reader.offset + size
+            if elementID == ID.trackEntry, let track = readTrackEntry(&reader, until: bodyEnd) {
+                state.subtitleTracks.append(track)
+            }
+            reader.seek(to: bodyEnd)
+        }
+    }
+
+    private func readTrackEntry(_ reader: inout EBMLReader, until end: Int) -> SubtitleTrack? {
+        var trackUID: UInt64?
+        var trackType: UInt64?
+        var codecID: String?
+        var language: String?
+        var languageBCP47: String?
+        var name: String?
+        var isDefault = false
+        var isForced = false
+        var isEnabled = true
+
+        while reader.offset < end {
+            guard let fieldID = try? reader.readElementID(),
+                  let size = try? reader.readSize().map({ Int($0) })
+            else { return nil }
+            let fieldEnd = reader.offset + size
+
+            switch fieldID {
+            case ID.trackUID: trackUID = reader.readUInt(length: size)
+            case ID.trackType: trackType = reader.readUInt(length: size)
+            case ID.codecID: codecID = reader.readString(length: size)
+            case ID.language: language = reader.readString(length: size)
+            case ID.languageBCP47: languageBCP47 = reader.readString(length: size)
+            case ID.trackName: name = reader.readString(length: size)
+            case ID.flagDefault: isDefault = reader.readUInt(length: size) == 1
+            case ID.flagForced: isForced = reader.readUInt(length: size) == 1
+            case ID.flagEnabled: isEnabled = reader.readUInt(length: size) != 0
+            default: break
+            }
+            reader.seek(to: fieldEnd)
+        }
+
+        guard trackType == ID.subtitleTrackType, let trackUID, let codecID else { return nil }
+        return SubtitleTrack(
+            trackUID: trackUID, codecID: codecID, language: languageBCP47 ?? language,
+            name: name?.isEmpty == false ? name : nil,
+            isDefault: isDefault, isForced: isForced, isEnabled: isEnabled
+        )
     }
 }
