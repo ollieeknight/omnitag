@@ -47,7 +47,11 @@ public struct FilenamePattern: Sendable, Equatable {
         ("subtitle", .subtitle),
         ("show", .showName), ("season", .seasonNumber), ("episode", .episodeNumber),
         ("episodetitle", .episodeTitle), ("director", .director),
-        ("studio", .studio), ("rating", .contentRating)
+        ("studio", .studio), ("rating", .contentRating),
+        // Without a name here a modelled key silently becomes `TagKey.custom`
+        // — a different key — so `%tmdbid%` rendered nothing for a file that
+        // had one. `[tmdbid-1234]` is the bracket form Plex and Jellyfin read.
+        ("tmdbid", .tmdbID), ("synopsis", .synopsis)
     ]
 
     /// Keys written as counting numbers: padded on the way out, parsed as
