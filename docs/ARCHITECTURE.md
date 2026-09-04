@@ -34,8 +34,9 @@ module precisely so Previews work.
 MediaCore        domain model + FilenamePattern, no I/O, no framework imports
                  beyond Foundation
 TagIO            MediaTagReader facade + per-format readers/writers + key maps
-LibraryIndex     folder scan and file typing (persistence: not built yet)
-MetadataAPI      protocol MetadataProvider + per-service clients (Audible, Audnexus, OpenLibrary, TMDB)
+LibraryIndex     folder scan and file typing. Which folders to re-scan on
+                 launch is `LibraryRootStore` (OmniTagApp), not this module
+MetadataAPI      protocol MetadataProvider + per-service clients (Audible, Audnexus, OpenLibrary, TMDB, iTunes)
 EditEngine       batch edit, undo/redo, save orchestration, backups, renaming
 OmniTagApp     SwiftUI executable
 ```
@@ -104,7 +105,7 @@ protocol MetadataProvider {
 ```
 
 Per kind, an ordered provider list with fallback:
-- music: iTunes Search API (no key) → MusicBrainz (rate-limited, 1 req/s, UA required) — not built yet
+- music: iTunes Search API (no key) ✅ → MusicBrainz (rate-limited, 1 req/s, UA required) — not built
 - audiobook: Audible (catalogue search, ASIN lookup) + Audnexus (ASIN-keyed detail, chapters) ✅
 - book: OpenLibrary (search, work/edition lookup) ✅
 - movie: TMDB (key via Keychain + preferences pane) ✅ — see `docs/MOVIES_TV.md`
@@ -141,6 +142,7 @@ Full keyboard: ⌘F search, ⌘S write, ⌘Z undo, ⏎ edit, Space quicklook.
 3. ✅ EditEngine: batch edit, undo/redo, save; inspector UI.
 4. ✅ ID3 read, chapter read, Matroska read, `MediaTagReader` facade.
 5. ✅ mp3 write (hand-rolled ID3v2.4), mkv write (in-place element rewrite).
-6. ✅ Metadata providers (Audible, Audnexus, OpenLibrary), artwork editing (drop, folder discovery, clipboard paste).
-7. ✅ Chapter editing (MPEG-4 chapter writer, inspector studio, wizard diff), ✅ filename↔tag conversion (`FilenamePattern`, `RenamePlan`).
-8. flac, ogg/opus.
+6. ✅ Metadata providers — every kind has one: Audible + Audnexus, OpenLibrary, TMDB, iTunes Search. Artwork editing (drop, folder discovery, clipboard paste).
+7. ✅ Chapter editing (MPEG-4 and mkv writers, inspector studio, wizard diff), ✅ filename↔tag conversion (`FilenamePattern`, `RenamePlan`), ✅ mkv subtitle-track metadata, ✅ library persistence.
+8. **Power-user throughput**: find & replace, bulk transforms, audit views, saved actions, multi-artwork, CSV round-trip, duplicates, per-file batch fetch. This is where the category's value actually is — see `COMPETITION.md`.
+9. flac, ogg/opus.
