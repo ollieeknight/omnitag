@@ -79,17 +79,17 @@ struct LibraryModelVisibleTests {
     func filtersByKind() {
         let model = LibraryModel()
         model.items = [item("A", kind: .movie), item("B", kind: .tvEpisode)]
-        model.kind = .movie
+        model.scope = .kind(.movie)
         #expect(model.visible.map(\.displayTitle) == ["A"])
 
-        model.kind = .tvEpisode
+        model.scope = .kind(.tvEpisode)
         #expect(model.visible.map(\.displayTitle) == ["B"])
     }
 
     @Test("reflects a later change to items, not a stale snapshot")
     func reflectsItemsChanges() {
         let model = LibraryModel()
-        model.kind = .movie
+        model.scope = .kind(.movie)
         model.items = [item("A")]
         #expect(model.visible.map(\.displayTitle) == ["A"])
 
@@ -100,7 +100,7 @@ struct LibraryModelVisibleTests {
     @Test("reflects a later change to search")
     func reflectsSearchChanges() {
         let model = LibraryModel()
-        model.kind = .movie
+        model.scope = .kind(.movie)
         model.items = [item("Alpha"), item("Beta")]
         #expect(model.visible.count == 2)
 
@@ -114,7 +114,7 @@ struct LibraryModelVisibleTests {
     @Test("reflects a later change to showUnsavedOnly and dirtyURLs")
     func reflectsUnsavedFilterChanges() {
         let model = LibraryModel()
-        model.kind = .movie
+        model.scope = .kind(.movie)
         let a = item("A")
         let b = item("B")
         model.items = [a, b]
@@ -131,7 +131,7 @@ struct LibraryModelVisibleTests {
     @Test("reflects a later change to sortOrder")
     func reflectsSortOrderChanges() {
         let model = LibraryModel()
-        model.kind = .movie
+        model.scope = .kind(.movie)
         model.items = [item("Beta"), item("Alpha")]
         #expect(model.visible.map(\.displayTitle) == ["Alpha", "Beta"], "default sort is by title")
 
@@ -153,9 +153,9 @@ struct LibraryModelCountTests {
             MediaItem(url: URL(filePath: "/tmp/d.mkv"), kind: .tvEpisode, container: .mkv)
         ]
 
-        #expect(model.count(for: .music) == 1)
-        #expect(model.count(for: .movie) == 1)
-        #expect(model.count(for: .tvEpisode) == 2)
-        #expect(model.count(for: .book) == 0)
+        #expect(model.count(for: .kind(.music)) == 1)
+        #expect(model.count(for: .kind(.movie)) == 1)
+        #expect(model.count(for: .kind(.tvEpisode)) == 2)
+        #expect(model.count(for: .kind(.book)) == 0)
     }
 }
