@@ -22,10 +22,14 @@ public struct TagDiff: Sendable {
     public var rows: [Row]
 
     public init(current: TagSet, proposed: TagSet, kind: MediaKind) {
-        let allKeys = Set(TagKey.standardFields(for: kind).map(\.key))
-            .union(current.values.keys)
-            .union(proposed.values.keys)
-        rows = allKeys.sorted(by: { "\($0)" < "\($1)" }).map { key in
+        // The curated order first — a TV episode reads Title, Show, Season,
+        // Episode, not the alphabet's Director, Episode Number, Genre… —
+        // then anything the file or provider carries beyond it.
+        let standard = TagKey.standardFields(for: kind).map(\.key)
+        let extras = Set(current.values.keys).union(proposed.values.keys)
+            .subtracting(standard)
+            .sorted(by: { "\($0)" < "\($1)" })
+        rows = (standard + extras).map { key in
             Row(key: key, current: current[key], proposed: proposed[key])
         }
     }
@@ -36,7 +40,9 @@ public struct TagDiff: Sendable {
     public func delta(for keys: Set<TagKey>) -> TagSet {
         var result = TagSet()
         for row in rows where keys.contains(row.key) {
-            guard let proposed = row.proposed else { continue }
+            guard let proposed = row.proposed,
+                  !(proposed.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
             result[row.key] = proposed
         }
         return result
@@ -136,6 +142,14 @@ public struct ChapterDiff: Sendable {
     /// seconds-long "Part Two" markers that sit on top of a real chapter — taking
     /// one shifts every later title by one, so a candidate whose length is
     /// nothing like the file chapter's is refused.
+    /// How many of the file's chapters found a provider title. What the
+    /// mismatch notice reports, so it describes the real outcome rather than
+    /// promising a match it may not have made.
+    public static func matchedCount(fileChapters: [Chapter], providerChapters: [Chapter]) -> Int {
+        let matched = matchTitles(fileChapters: fileChapters, providerChapters: providerChapters)
+        return zip(fileChapters, matched).count { $0.title != $1 }
+    }
+
     public static func matchTitles(fileChapters: [Chapter], providerChapters: [Chapter]) -> [String] {
         guard !providerChapters.isEmpty else { return fileChapters.map(\.title) }
         if fileChapters.count == providerChapters.count {
@@ -172,6 +186,14 @@ public struct ChapterDiff: Sendable {
         return matched
     }
 
+    /// A Roman numeral, so `Part I` can be told from `Part 1`. Both are
+    /// structural, but only the second is a plain number — and a file whose
+    /// only markers are `Part I`…`Part V` (Fulgrim) has real information in
+    /// them that a renumbering would destroy.
+    private static func isRomanNumeral(_ word: String) -> Bool {
+        !word.isEmpty && word.allSatisfy { "ivxlcdm".contains($0) }
+    }
+
     private static let genericWords: Set = [
         "chapter", "part", "track", "disc", "section", "book",
         "intro", "outro", "opening", "credits", "prologue", "epilogue",
@@ -195,15 +217,48 @@ public struct ChapterDiff: Sendable {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard !words.isEmpty else { return true }
+        // A Roman numeral beside a structural word ("Part I") is real: it is
+        // the file's own division, and nothing can reconstruct it once gone.
+        if words.count == 2, genericWords.contains(words[0]), isRomanNumeral(words[1]) {
+            return false
+        }
         return words.allSatisfy { word in
             Int(word) != nil || genericWords.contains(word)
         }
     }
 
+    /// Whether this list holds titles worth protecting from a bulk rename.
+    ///
+    /// **Any** real title counts. A ratio was tried first and had it exactly
+    /// backwards: three real titles among twenty-eight generic ones scored
+    /// 11% and were silently overwritten, yet those three are precisely the
+    /// ones that cannot be recovered — a book that is *mostly* numbered is
+    /// more fragile than one that is fully written out, not less. Measured
+    /// against a real 50-book library, the ratio mis-classified nine of them.
     public static func hasRichTitles(_ chapters: [Chapter]) -> Bool {
         guard chapters.count >= 2 else { return false }
-        let rich = chapters.filter { !isGeneric(title: $0.title) }.count
-        return Double(rich) / Double(chapters.count) >= 0.2
+        return chapters.contains { !isGeneric(title: $0.title) }
+    }
+
+    /// The titles a bulk rename would destroy, in file order.
+    public static func realTitles(_ chapters: [Chapter]) -> [String] {
+        chapters.map(\.title).filter { !isGeneric(title: $0) }
+    }
+
+    /// Whether to start with chapters skipped, and what to tell the user.
+    ///
+    /// Names the titles at risk rather than only saying that some exist: with
+    /// three real titles in a twenty-four-row table, "this file has written-out
+    /// titles" does not tell you which three to go and look at.
+    public static func protectionNotice(file: [Chapter], provider: [Chapter]) -> (skip: Bool, notice: String?) {
+        let atRisk = realTitles(file)
+        guard hasRichTitles(file), !hasRichTitles(provider), !atRisk.isEmpty else { return (false, nil) }
+
+        let sample = atRisk.prefix(3).map { "“\($0)”" }.joined(separator: ", ")
+        let more = atRisk.count > 3 ? " and \(atRisk.count - 3) more" : ""
+        let noun = atRisk.count == 1 ? "title" : "titles"
+        return (true, "\(atRisk.count) chapter \(noun) in this file would be lost — \(sample)\(more). "
+            + "The provider only has numbered ones, so chapters start skipped.")
     }
 
     /// What the wizard will write: whatever the (possibly hand-edited) rows say.
