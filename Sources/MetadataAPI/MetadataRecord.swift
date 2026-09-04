@@ -11,15 +11,27 @@ public struct MetadataQuery: Sendable, Equatable {
     public var narrator: String?
     public var asin: String?
 
+    /// Scraped out of a video filename, never typed. The episode picker opens
+    /// on the season the file already names, and a movie's year disambiguates
+    /// remakes in the result list — both are in the filename of essentially
+    /// every ripped file, and both were previously thrown away.
+    public var season: Int?
+    public var episode: Int?
+    public var year: Int?
+
     public init(
         keywords: String? = nil, title: String? = nil, author: String? = nil,
-        narrator: String? = nil, asin: String? = nil
+        narrator: String? = nil, asin: String? = nil,
+        season: Int? = nil, episode: Int? = nil, year: Int? = nil
     ) {
         self.keywords = keywords
         self.title = title
         self.author = author
         self.narrator = narrator
         self.asin = asin
+        self.season = season
+        self.episode = episode
+        self.year = year
     }
 
     public var isEmpty: Bool {
@@ -110,6 +122,32 @@ public struct MetadataQuery: Sendable, Equatable {
         return score
     }
 
+    /// The provider's own order, nudged only by what the filename actually
+    /// told us. TMDB ranks by popularity, which puts a remake above the
+    /// original — a year scraped from the filename is the one signal that
+    /// reliably tells them apart. With no year, this is the identity: a
+    /// provider that ranks well is not second-guessed.
+    public func ranked(_ candidates: [MetadataCandidate]) -> [MetadataCandidate] {
+        guard let year else { return candidates }
+        return candidates.enumerated().sorted { a, b in
+            let scoreA = Self.yearScore(a.element.year, wanted: year)
+            let scoreB = Self.yearScore(b.element.year, wanted: year)
+            return scoreA == scoreB ? a.offset < b.offset : scoreA > scoreB
+        }.map(\.element)
+    }
+
+    /// An exact year wins outright; a year one out still beats an unrelated
+    /// one, because a release date and a filename's year often straddle a
+    /// new year (a December film named for the year it reached cinemas).
+    private static func yearScore(_ found: Int?, wanted: Int) -> Int {
+        guard let found else { return 0 }
+        return switch abs(found - wanted) {
+        case 0: 2
+        case 1: 1
+        default: 0
+        }
+    }
+
     /// Audible's search index has holes — some books it sells are reachable only
     /// by ASIN — so a pasted product URL or a bare ASIN is a first-class query.
     /// `B0…`/`B1…` ten-character identifiers, or any audible.* URL containing one.
@@ -127,13 +165,56 @@ public struct MetadataQuery: Sendable, Equatable {
             self.init(asin: asin)
             return
         }
+        let scraped = Self.videoParts(filename)
         let title = tags.title ?? tags.album
         let author = tags[.author]?.stringValue ?? tags.artist
         if title?.isEmpty == false || author?.isEmpty == false {
-            self.init(title: title, author: author)
+            self.init(
+                title: title, author: author,
+                season: tags[.seasonNumber]?.intValue ?? scraped.season,
+                episode: tags[.episodeNumber]?.intValue ?? scraped.episode,
+                year: tags[.year]?.intValue ?? scraped.year
+            )
             return
         }
-        self.init(keywords: Self.cleanedFilename(filename))
+        self.init(
+            keywords: Self.cleanedFilename(filename),
+            season: scraped.season, episode: scraped.episode, year: scraped.year
+        )
+    }
+
+    /// Resolution, source, codec, audio format, and the edition words that
+    /// follow a title in a scene release name. Everything from the first one
+    /// onwards is the encoder's business, not the film's.
+    private static let releaseNoise = {
+        let terms = [
+            #"\d{3,4}[pi]"#, "4k", "uhd", "hdr", "hevc", "bluray", "blu-ray", "brrip",
+            "bdrip", "webrip", "web-dl", "webdl", "hdtv", "dvdrip", "remux",
+            "x26[45]", #"h\.?26[45]"#, "xvid", "divx", "aac", "ac3", "dts(-hd)?",
+            "truehd", "atmos", #"ddp?5\.1"#, "10bit", "proper", "repack",
+            "extended", "remastered"
+        ]
+        return #"\b("# + terms.joined(separator: "|") + #")\b.*$"#
+    }()
+
+    /// Season/episode/year read straight out of a filename. A ripped video is
+    /// named `Show.S01E01.…` or `Show 1x01 …` almost without exception, and a
+    /// film carries its year — throwing that away and making the user retype
+    /// it is the friction this removes.
+    static func videoParts(_ filename: String) -> (season: Int?, episode: Int?, year: Int?) {
+        let name = (filename as NSString).deletingPathExtension
+        var season: Int?
+        var episode: Int?
+        if let match = name.firstMatch(of: #/[Ss](\d{1,2})[Ee](\d{1,3})|\b(\d{1,2})x(\d{1,3})\b/#) {
+            season = (match.1 ?? match.3).flatMap { Int($0) }
+            episode = (match.2 ?? match.4).flatMap { Int($0) }
+        }
+        // A four-digit run that reads as a release year, not part of a title
+        // ("2001: A Space Odyssey" is a title; ".1968." is a year) — so it has
+        // to be delimited and inside the plausible range for a film.
+        let year = name.matches(of: #/[\.\s\(\[](19\d{2}|20\d{2})[\.\s\)\]]/#)
+            .compactMap { Int($0.1) }.last
+        return (season, episode, year)
     }
 
     /// Filenames carry rubbish that ruins a search: extensions, bitrates,
@@ -147,6 +228,23 @@ public struct MetadataQuery: Sendable, Equatable {
         name = name.replacingOccurrences(
             of: #"\b(unabridged|abridged|audiobook|m4b|mp3|\d{2,3}kbps)\b"#,
             with: " ", options: [.regularExpression, .caseInsensitive]
+        )
+        // Everything from the SxxEyy marker onwards is the episode title and
+        // the release group's signature; TMDB's TV search wants the show.
+        if let marker = name.range(
+            of: #"\s[Ss]\d{1,2}[Ee]\d{1,3}\b|\s\d{1,2}x\d{1,3}\b"#, options: .regularExpression
+        ) {
+            name = String(name[name.startIndex ..< marker.lowerBound])
+        }
+        // Video release noise: resolution, source, codec, audio, and the
+        // trailing `-GROUP`. Anchored to whole words so a title is never eaten.
+        name = name.replacingOccurrences(
+            of: Self.releaseNoise,
+            with: " ", options: [.regularExpression, .caseInsensitive]
+        )
+        // A delimited release year is metadata, not part of the title.
+        name = name.replacingOccurrences(
+            of: #"\s(19\d{2}|20\d{2})\s*$"#, with: " ", options: .regularExpression
         )
         return name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
@@ -226,6 +324,17 @@ public struct MetadataRecord: Sendable, Equatable {
     public var episodeTitle: String?
     public var tmdbID: String?
 
+    // MARK: music — iTunes
+
+    /// An audiobook's `album` is its own title (players group by album), so
+    /// these are music's own fields rather than reuses of the book ones.
+    public var album: String?
+    public var albumArtist: String?
+    public var trackNumber: Int?
+    public var trackTotal: Int?
+    public var discNumber: Int?
+    public var discTotal: Int?
+
     public init(
         id: String, title: String, subtitle: String? = nil, authors: [String] = [],
         narrators: [String] = [], publisher: String? = nil, year: Int? = nil,
@@ -234,7 +343,11 @@ public struct MetadataRecord: Sendable, Equatable {
         artworkURL: URL? = nil, asin: String? = nil, isbn: String? = nil,
         director: String? = nil, studio: String? = nil, contentRating: String? = nil,
         showName: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil,
-        episodeTitle: String? = nil, tmdbID: String? = nil, kind: MediaKind = .audiobook
+        episodeTitle: String? = nil, tmdbID: String? = nil,
+        album: String? = nil, albumArtist: String? = nil,
+        trackNumber: Int? = nil, trackTotal: Int? = nil,
+        discNumber: Int? = nil, discTotal: Int? = nil,
+        kind: MediaKind = .audiobook
     ) {
         self.kind = kind
         self.id = id
@@ -260,6 +373,12 @@ public struct MetadataRecord: Sendable, Equatable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.episodeTitle = episodeTitle
+        self.album = album
+        self.albumArtist = albumArtist
+        self.trackNumber = trackNumber
+        self.trackTotal = trackTotal
+        self.discNumber = discNumber
+        self.discTotal = discTotal
         self.tmdbID = tmdbID
     }
 
@@ -293,9 +412,15 @@ public struct MetadataRecord: Sendable, Equatable {
         }
         if !authors.isEmpty {
             let authorString = authors.joined(separator: ", ")
-            tags[.author] = .string(authorString)
+            // A track's person is its artist, not its author — `.author` is a
+            // book field, and writing it on music puts an audiobook tag on
+            // every song. Music's album artist is set from the collection
+            // below, which is a different person on a compilation.
+            if kind != .music {
+                tags[.author] = .string(authorString)
+                tags[.albumArtist] = .string(authorString)
+            }
             tags[.artist] = .string(authorString)
-            tags[.albumArtist] = .string(authorString)
         }
         if !narrators.isEmpty {
             let narratorString = narrators.joined(separator: ", ")
@@ -354,8 +479,33 @@ public struct MetadataRecord: Sendable, Equatable {
         if let tmdbID {
             tags[.tmdbID] = .string(tmdbID)
         }
-        if kind != .movie, kind != .tvEpisode {
-            tags.album = title // players group audiobooks by album; movies/TV have no album concept
+        // Music carries a real album, and its own artist/track fields. An
+        // audiobook has no album of its own, so players group it by title.
+        // Movies and TV have no album concept at all.
+        switch kind {
+        case .music:
+            if let album {
+                tags.album = album
+            }
+            if let albumArtist {
+                tags[.albumArtist] = .string(albumArtist)
+            }
+            if let trackNumber {
+                tags[.trackNumber] = .number(trackNumber)
+            }
+            if let trackTotal {
+                tags[.trackTotal] = .number(trackTotal)
+            }
+            if let discNumber {
+                tags[.discNumber] = .number(discNumber)
+            }
+            if let discTotal {
+                tags[.discTotal] = .number(discTotal)
+            }
+        case .audiobook, .book:
+            tags.album = title
+        case .movie, .tvEpisode:
+            break
         }
         return tags
     }
